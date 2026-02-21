@@ -1,0 +1,155 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Lookahead got some objects 1`] = `
+[
+  {
+    "content": {
+      "id": "obj0",
+    },
+    "disabled": false,
+    "enable": {
+      "end": "#piece0obj0.start",
+      "start": 1,
+    },
+    "id": "lookahead_timed0_piece0obj0",
+    "isLookahead": true,
+    "layer": "PRELOAD_lookahead",
+    "lookaheadForLayer": "PRELOAD",
+    "pieceInstanceId": "piece0",
+    "priority": 0.1,
+  },
+  {
+    "content": {
+      "id": "obj1",
+    },
+    "disabled": false,
+    "enable": {
+      "end": "#piece1obj1.start",
+      "start": "#piece0obj0.start + 0",
+    },
+    "id": "lookahead_timed1_piece1obj1",
+    "isLookahead": true,
+    "layer": "PRELOAD_lookahead",
+    "lookaheadForLayer": "PRELOAD",
+    "pieceInstanceId": "piece1",
+    "priority": 0.1,
+  },
+  {
+    "content": {
+      "id": "obj2",
+    },
+    "disabled": false,
+    "enable": {
+      "while": "1",
+    },
+    "id": "lookahead_future0_piece0obj2",
+    "isLookahead": true,
+    "layer": "PRELOAD_lookahead",
+    "lookaheadForLayer": "PRELOAD",
+    "pieceInstanceId": "piece0",
+    "priority": 0.07500000000000001,
+  },
+  {
+    "content": {
+      "id": "obj3",
+    },
+    "disabled": false,
+    "enable": {
+      "while": "1",
+    },
+    "id": "lookahead_future1_piece0obj3",
+    "isLookahead": true,
+    "layer": "PRELOAD_lookahead",
+    "lookaheadForLayer": "PRELOAD",
+    "pieceInstanceId": "piece0",
+    "priority": 0.05,
+  },
+  {
+    "content": {
+      "id": "obj4",
+    },
+    "disabled": false,
+    "enable": {
+      "while": "1",
+    },
+    "id": "lookahead_future2_piece0obj4",
+    "isLookahead": true,
+    "layer": "PRELOAD_lookahead",
+    "lookaheadForLayer": "PRELOAD",
+    "pieceInstanceId": "piece0",
+    "priority": 0.025,
+  },
+  {
+    "content": {
+      "id": "obj5",
+    },
+    "disabled": false,
+    "enable": {
+      "end": "#piece1obj5.start",
+      "start": 1,
+    },
+    "id": "lookahead_timed0_piece1obj5",
+    "isLookahead": true,
+    "layer": "WHEN_CLEAR",
+    "pieceInstanceId": "piece1",
+    "priority": 0.1,
+  },
+  {
+    "content": {
+      "id": "obj6",
+    },
+    "disabled": false,
+    "enable": {
+      "end": "#piece0obj6.start",
+      "start": "#piece1obj5.start + 0",
+    },
+    "id": "lookahead_timed1_piece0obj6",
+    "isLookahead": true,
+    "layer": "WHEN_CLEAR",
+    "pieceInstanceId": "piece0",
+    "priority": 0.1,
+  },
+  {
+    "content": {
+      "id": "obj7",
+    },
+    "disabled": false,
+    "enable": {
+      "start": "#piece0obj6.start + 0",
+    },
+    "id": "lookahead_future0_piece1obj7",
+    "isLookahead": true,
+    "layer": "WHEN_CLEAR",
+    "pieceInstanceId": "piece1",
+    "priority": 0.07500000000000001,
+  },
+  {
+    "content": {
+      "id": "obj8",
+    },
+    "disabled": true,
+    "enable": {
+      "while": "1",
+    },
+    "id": "lookahead_future1_piece1obj8",
+    "isLookahead": true,
+    "layer": "WHEN_CLEAR",
+    "pieceInstanceId": "piece1",
+    "priority": 0.05,
+  },
+  {
+    "content": {
+      "id": "obj9",
+    },
+    "disabled": true,
+    "enable": {
+      "while": "1",
+    },
+    "id": "lookahead_future2_piece0obj9",
+    "isLookahead": true,
+    "layer": "WHEN_CLEAR",
+    "pieceInstanceId": "piece0",
+    "priority": 0.025,
+  },
+]
+`;

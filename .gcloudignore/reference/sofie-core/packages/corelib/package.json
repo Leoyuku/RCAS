@@ -1,0 +1,68 @@
+{
+	"name": "@sofie-automation/corelib",
+	"version": "1.51.7",
+	"private": true,
+	"description": "Internal library for some types shared by core and workers",
+	"main": "dist/index.js",
+	"typings": "dist/index.d.ts",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nrkno/sofie-core.git",
+		"directory": "packages/corelib"
+	},
+	"bugs": {
+		"url": "https://github.com/nrkno/sofie-core/issues"
+	},
+	"homepage": "https://github.com/nrkno/sofie-core/blob/master/packages/corelib#readme",
+	"scripts": {
+		"build": "run -T rimraf dist && run build:main",
+		"build:main": "run -T tsc -p tsconfig.build.json",
+		"lint:raw": "run -T eslint --ext .ts --ext .js --ignore-pattern dist",
+		"lint": "run lint:raw .",
+		"unit": "run -T jest",
+		"test": "run lint && run unit",
+		"watch": "run -T jest --watch --coverage=false",
+		"cov": "run -T jest --coverage; open-cli coverage/lcov-report/index.html",
+		"cov-open": "open-cli coverage/lcov-report/index.html",
+		"validate:dependencies": "yarn npm audit --environment production && run license-validate",
+		"validate:dev-dependencies": "yarn npm audit --environment development",
+		"license-validate": "run -T sofie-licensecheck"
+	},
+	"engines": {
+		"node": "^14.19 || ^16.14 || ^18.12"
+	},
+	"files": [
+		"/dist",
+		"/CHANGELOG.md",
+		"/README.md",
+		"/LICENSE"
+	],
+	"dependencies": {
+		"@sofie-automation/blueprints-integration": "1.51.7",
+		"@sofie-automation/shared-lib": "1.51.7",
+		"fast-clone": "^1.5.13",
+		"i18next": "^21.10.0",
+		"influx": "^5.9.3",
+		"nanoid": "^3.3.7",
+		"object-path": "^0.11.8",
+		"prom-client": "^14.2.0",
+		"timecode": "0.0.4",
+		"tslib": "^2.6.2",
+		"type-fest": "^3.13.1",
+		"underscore": "^1.13.6"
+	},
+	"peerDependencies": {
+		"mongodb": "^5.5.0"
+	},
+	"prettier": "@sofie-automation/code-standard-preset/.prettierrc.json",
+	"lint-staged": {
+		"*.{js,css,json,md,scss}": [
+			"yarn run -T prettier"
+		],
+		"*.{ts,tsx}": [
+			"yarn lint:raw"
+		]
+	},
+	"packageManager": "yarn@3.5.0"
+}

@@ -1,0 +1,96 @@
+import {
+	DebugRegenerateNextPartInstanceProps,
+	DebugSyncInfinitesForNextPartInstanceProps,
+} from '@sofie-automation/corelib/dist/worker/studio'
+import { runJobWithStudioPlayoutModel } from '../studio/lock'
+import { JobContext } from '../jobs'
+import { logger } from '../logging'
+import { syncPlayheadInfinitesForNextPartInstance } from './infinites'
+import { setNextPart } from './setNext'
+import { runJobWithPlayoutModel } from './lock'
+import { updateStudioTimeline, updateTimeline } from './timeline/generate'
+
+/**
+ * Ensure that the infinite pieces on the nexted-part are correct
+ * Added to debug some issues with infinites not updating
+ */
+export async function handleDebugSyncPlayheadInfinitesForNextPartInstance(
+	context: JobContext,
+	data: DebugSyncInfinitesForNextPartInstanceProps
+): Promise<void> {
+	logger.info(`syncPlayheadInfinitesForNextPartInstance ${data.playlistId}`)
+
+	await runJobWithPlayoutModel(context, data, null, async (playoutModel) => {
+		await syncPlayheadInfinitesForNextPartInstance(
+			context,
+			playoutModel,
+			playoutModel.currentPartInstance,
+			playoutModel.nextPartInstance
+		)
+	})
+}
+
+/**
+ * Regenerate the nexted-partinstance from its part.
+ * This can be useful to get ingest updates across when the blueprint syncIngestUpdateToPartInstance method is not implemented, or to bypass that method when it is defined
+ */
+export async function handleDebugRegenerateNextPartInstance(
+	context: JobContext,
+	data: DebugRegenerateNextPartInstanceProps
+): Promise<void> {
+	logger.info('regenerateNextPartInstance')
+
+	await runJobWithPlayoutModel(context, data, null, async (playoutModel) => {
+		const playlist = playoutModel.playlist
+		const originalNextPartInfo = playlist.nextPartInfo
+		if (originalNextPartInfo && playlist.activationId) {
+			const nextPartInstance = playoutModel.nextPartInstance
+			const part = nextPartInstance ? playoutModel.findPart(nextPartInstance.partInstance.part._id) : undefined
+			if (part) {
+				await setNextPart(context, playoutModel, null, false)
+				await setNextPart(
+					context,
+					playoutModel,
+					{ part: part, consumesQueuedSegmentId: false },
+					originalNextPartInfo.manuallySelected
+				)
+
+				await updateTimeline(context, playoutModel)
+			}
+		}
+	})
+}
+
+/**
+ * Debug: Force the worker to throw an error
+ */
+export async function handleDebugCrash(context: JobContext, data: DebugRegenerateNextPartInstanceProps): Promise<void> {
+	logger.info('debugCrash')
+
+	await runJobWithPlayoutModel(context, data, null, async (playoutModel) => {
+		setTimeout(() => {
+			//@ts-expect-error: 2339
+			playoutModel.callUndefined()
+		}, 10)
+	})
+}
+
+/**
+ * Debug: Regenerate the timeline for the Studio
+ */
+export async function handleDebugUpdateTimeline(context: JobContext, _data: void): Promise<void> {
+	await runJobWithStudioPlayoutModel(context, async (studioPlayoutModel) => {
+		const activePlaylists = studioPlayoutModel.getActiveRundownPlaylists()
+		if (activePlaylists.length > 1) {
+			throw new Error(`Too many active playlists`)
+		} else if (activePlaylists.length > 0) {
+			const playlist = activePlaylists[0]
+
+			await runJobWithPlayoutModel(context, { playlistId: playlist._id }, null, async (playoutModel) => {
+				await updateTimeline(context, playoutModel)
+			})
+		} else {
+			await updateStudioTimeline(context, studioPlayoutModel)
+		}
+	})
+}

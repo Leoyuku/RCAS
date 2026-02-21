@@ -1,0 +1,77 @@
+{
+	"name": "playout-gateway",
+	"version": "1.51.7",
+	"private": true,
+	"description": "Connect to Core, play stuff",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nrkno/sofie-core.git",
+		"directory": "packages/playout-gateway"
+	},
+	"bugs": {
+		"url": "https://github.com/nrkno/sofie-core/issues"
+	},
+	"homepage": "https://github.com/nrkno/sofie-core/blob/master/packages/playout-gateway#readme",
+	"author": {
+		"name": "Johan Nyman",
+		"email": "johan@superfly.tv",
+		"url": "http://superfly.tv"
+	},
+	"contributors": [],
+	"scripts": {
+		"build": "run -T rimraf dist && run build:main",
+		"buildstart": "run build && run dev",
+		"buildinspect": "run build && run inspect",
+		"build:main": "run -T tsc -p tsconfig.build.json",
+		"lint:raw": "run -T eslint --ext .ts --ext .js --ignore-pattern dist",
+		"lint": "run lint:raw .",
+		"unit": "run -T jest",
+		"test": "run lint && run unit",
+		"watch": "run -T jest --watch",
+		"cov": "run -T jest; run -T open-cli coverage/lcov-report/index.html",
+		"cov-open": "open-cli coverage/lcov-report/index.html",
+		"ci": "run test",
+		"inspect": "node --inspect dist/index.js",
+		"start": "node dist/index.js",
+		"dev": "run start -id localDevPg",
+		"validate:dependencies": "yarn npm audit --environment production && run license-validate",
+		"validate:dev-dependencies": "yarn npm audit --environment development",
+		"license-validate": "run -T sofie-licensecheck"
+	},
+	"engines": {
+		"node": "^14.19 || ^16.14 || ^18.12"
+	},
+	"keywords": [
+		"broadcast",
+		"socket",
+		"typescript",
+		"javascript",
+		"open",
+		"source",
+		"automation",
+		"ncs",
+		"nrcs",
+		"rundown",
+		"production"
+	],
+	"dependencies": {
+		"@sofie-automation/server-core-integration": "1.51.7",
+		"@sofie-automation/shared-lib": "1.51.7",
+		"debug": "^4.3.4",
+		"influx": "^5.9.3",
+		"timeline-state-resolver": "9.2.2",
+		"tslib": "^2.6.2",
+		"underscore": "^1.13.6",
+		"winston": "^3.11.0"
+	},
+	"lint-staged": {
+		"*.{css,json,md,scss}": [
+			"yarn run -T prettier"
+		],
+		"*.{ts,tsx,js,jsx}": [
+			"yarn lint:raw"
+		]
+	},
+	"packageManager": "yarn@3.5.0"
+}

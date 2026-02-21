@@ -1,0 +1,90 @@
+{
+	"name": "@sofie-automation/server-core-integration",
+	"version": "1.51.7",
+	"description": "Library for connecting to Core",
+	"main": "dist/index.js",
+	"typings": "dist/index.d.ts",
+	"module": "dist/module/index.js",
+	"browser": "dist/browser/index.js",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nrkno/sofie-core.git",
+		"directory": "packages/server-core-integration"
+	},
+	"bugs": {
+		"url": "https://github.com/nrkno/sofie-core/issues"
+	},
+	"homepage": "https://github.com/nrkno/sofie-core/blob/master/packages/server-core-integration#readme",
+	"author": {
+		"name": "Johan Nyman",
+		"email": "johan@superfly.tv",
+		"url": "http://superfly.tv"
+	},
+	"contributors": [
+		{
+			"name": "Stephan Nordnes Eriksen",
+			"email": "Stephanruler@gmail.com"
+		},
+		{
+			"name": "Richard Cartwright",
+			"email": "spark@superfly.tv"
+		}
+	],
+	"scripts": {
+		"build": "run -T rimraf dist && run build:main && run copytypes",
+		"build:main": "run -T tsc -p tsconfig.build.json",
+		"lint:raw": "run -T eslint --ext .ts --ext .js --ignore-pattern dist",
+		"lint": "run lint:raw .",
+		"unit": "run -T jest",
+		"test": "run lint && run unit",
+		"test:integration": "run lint && run -T jest --config=jest-integration.config.js",
+		"watch": "run -T jest --watch",
+		"copytypes": "copyfiles -u 1 src/types/* dist",
+		"cov": "run -T jest --coverage; open-cli coverage/lcov-report/index.html",
+		"cov-open": "open-cli coverage/lcov-report/index.html",
+		"validate:dependencies": "yarn npm audit --environment production && run license-validate",
+		"validate:dev-dependencies": "yarn npm audit --environment development",
+		"license-validate": "run -T sofie-licensecheck"
+	},
+	"engines": {
+		"node": ">=14.19"
+	},
+	"files": [
+		"/dist",
+		"/CHANGELOG.md",
+		"/README.md",
+		"/LICENSE"
+	],
+	"keywords": [
+		"broadcast",
+		"socket",
+		"typescript",
+		"javascript",
+		"open",
+		"source",
+		"automation",
+		"ncs",
+		"nrcs",
+		"rundown",
+		"production"
+	],
+	"dependencies": {
+		"@sofie-automation/shared-lib": "1.51.7",
+		"ejson": "^2.2.3",
+		"eventemitter3": "^4.0.7",
+		"faye-websocket": "^0.11.4",
+		"got": "^11.8.6",
+		"tslib": "^2.6.2",
+		"underscore": "^1.13.6"
+	},
+	"lint-staged": {
+		"*.{js,css,json,md,scss}": [
+			"yarn run -T prettier"
+		],
+		"*.{ts,tsx}": [
+			"yarn lint:raw"
+		]
+	},
+	"packageManager": "yarn@3.5.0"
+}
