@@ -371,3 +371,382 @@ If a message is not acknowledged, it and all subsequent waiting messages will be
  
 
 Recommended Work Practice:  It is recommended that these messages be buffered in such a way that machine or application restart or reset will not destroy these buffered messages.
+
+4.1.1 heartbeat - Connection Confidence Indicator
+Purpose
+The heartbeat message is sent for the purpose of verifying network and application continuity.
+
+Response
+heartbeat
+
+Port
+MOS Lower Port (10540) - Media Object Metadata
+MOS Upper Port (10541) - Running Order
+
+Structural Outline
+mos
+    mosID
+    ncsID
+
+    messageID
+    heartbeat
+       time
+
+Syntax
+<!ELEMENT heartbeat (time)>
+
+Example
+<mos>
+  <mosID>aircache.newscenter.com</mosID>
+  <ncsID>ncs.newscenter.com</ncsID>
+
+  <messageID>9988</messageID>
+  <heartbeat>
+    <time>2009-04-11T17:20:42</time>
+  </heartbeat>
+</mos>
+
+ 
+
+
+4.1.2 reqMachInfo - Request Machine Information
+Purpose
+The reqMachInfo message is a method for an NCS or MOS to determine more information about its counterpart.
+
+Response
+listMachInfo
+
+Port
+MOS Lower Port (10540) - Media Object Metadata
+MOS Upper Port (10541) - Running Order
+
+Structural Outline
+mos
+    mosID
+    ncsID
+
+        messageID
+    reqMachInfo
+
+Syntax
+<!ELEMENT reqMachInfo EMPTY>
+
+Example
+<mos>
+  <mosID>aircache.newscenter.com</mosID>
+  <ncsID>ncs.newscenter.com</ncsID>
+
+  <messageID>3940</messageID>
+  <reqMachInfo/>
+</mos>
+
+ 
+
+
+4.1.3 listMachInfo - Machine Description List
+Purpose
+The listMachInfo message is a method for an NCS or MOS to send information about itself.
+
+Response
+None
+
+Port
+MOS Lower Port (10540) - Media Object Metadata
+MOS Upper Port (10541) - Running Order
+
+Structural Outline
+mos
+    mosID
+    ncsID
+
+        messageID
+    listMachInfo
+       manufacturer
+       model
+       hwRev
+       swRev
+       DOM
+       SN
+       ID
+       time
+       opTime?
+       mosRev
+
+       supportedProfiles (deviceType = (MOS, NCS))
+
+         mosProfile (number = (0))
+
+         mosProfile (number = (1))
+
+         mosProfile (number = (2))
+
+         mosProfile (number = (3))
+
+         mosProfile (number = (4))
+
+         mosProfile (number = (5))
+
+         mosProfile (number = (6))
+
+         mosProfile (number = (7))
+
+       defaultActiveX*
+
+            mode
+
+            controlFileLocation
+
+            controlSlug
+
+            controlName
+
+            controlDefaultParams
+
+       mosExternalMetadata*
+
+ 
+
+NOTE:  No two <defaultActiveX> elements can have the same <mode> value.
+
+Syntax
+<!ELEMENT listMachInfo (manufacturer, model, hwRev, swRev, DOM, SN, ID, time, opTime?, mosRev, supportedProfiles, defaultActiveX*, mosExternalMetadata*)>
+
+<!ELEMENT supportedProfiles (mosProfile)>
+
+<!ELEMENT mosProfile (#PCDATA)
+
+<!ATTLIST supportedProfiles deviceType CDATA #REQUIRED>
+
+<!ATTLIST mosProfile number CDATA #REQUIRED>
+
+<!ELEMENT defaultActiveX (mode, controlFileLocation, controlSlug, controlName, controlDefaultParams)>
+
+
+Example
+ This is an example of a NCS reply to the reqMachInfo message
+<mos>
+  <mosID>aircache.newscenter.com</mosID>
+  <ncsID>ncs.newscenter.com</ncsID>
+
+  <messageID>6331</messageID>
+  <listMachInfo>
+    <manufacturer>RadioVision, Ltd.</manufacturer>
+    <model>TCS6000</model>
+    <hwRev></hwRev>
+    <swRev>2.1.0.37</swRev>
+    <DOM></DOM>
+    <SN>927748927</SN>
+    <ID>airchache.newscenter.com</ID>
+    <time>2009-04-11T17:20:42</time>
+    <opTime>2009-03-01T23:55:10</opTime>
+    <mosRev>2.8.2</mosRev>
+
+    <supportedProfiles deviceType="NCS">
+
+      <mosProfile number="0">YES</mosProfile>
+
+<mosProfile number="1">YES</mosProfile>
+
+<mosProfile number="2">YES</mosProfile>
+
+<mosProfile number="3">YES</mosProfile>
+
+<mosProfile number="4">YES</mosProfile>
+
+<mosProfile number="5">YES</mosProfile>
+
+<mosProfile number="6">YES</mosProfile>
+
+<mosProfile number="7">YES</mosProfile>
+
+    </supportedProfiles>
+
+    <defaultActiveX>
+
+       <mode>CONTAINED</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>Contained Control</controlSlug>
+
+       <controlName>contained.containedCTRL.1</controlName>
+
+       <controlDefaultParams>URL=http://containedcontrolpage.com</controlDefaultParams>
+
+    </defaultActiveX>
+
+    <defaultActiveX>
+
+       <mode>MODAL</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>MODAL Control</controlSlug>
+
+       <controlName>modal.modalCTRL.1</controlName>
+
+       <controlDefaultParams></controlDefaultParams>
+
+    </defaultActiveX>
+  </listMachInfo>
+</mos>
+
+ 
+
+This is an example of a MOS reply to the reqMachInfo message
+<mos>
+  <mosID>aircache.newscenter.com</mosID>
+  <ncsID>ncs.newscenter.com</ncsID>
+
+  <messageID>6331</messageID>
+  <listMachInfo>
+    <manufacturer>RadioVision, Ltd.</manufacturer>
+    <model>TCS6000</model>
+    <hwRev></hwRev>
+    <swRev>2.1.0.37</swRev>
+    <DOM></DOM>
+    <SN>927748927</SN>
+    <ID>airchache.newscenter.com</ID>
+    <time>2009-04-11T17:20:42</time>
+    <opTime>2009-03-01T23:55:10</opTime>
+    <mosRev>2.8.2</mosRev>
+
+    <supportedProfiles deviceType="MOS">
+
+      <mosProfile number="0">YES</mosProfile>
+
+<mosProfile number="1">YES</mosProfile>
+
+<mosProfile number="2">YES</mosProfile>
+
+<mosProfile number="3">YES</mosProfile>
+
+<mosProfile number="4">YES</mosProfile>
+
+<mosProfile number="5">YES</mosProfile>
+
+<mosProfile number="6">YES</mosProfile>
+
+<mosProfile number="7">YES</mosProfile>
+
+    </supportedProfiles>
+
+    <defaultActiveX>
+
+       <mode>CONTAINED</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>Contained Control</controlSlug>
+
+       <controlName>contained.containedCTRL.1</controlName>
+
+       <controlDefaultParams>URL=http://containedcontrolpage.com</controlDefaultParams>
+
+    </defaultActiveX>
+
+    <defaultActiveX>
+
+       <mode>MODAL</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>MODAL Control</controlSlug>
+
+       <controlName>modal.modalCTRL.1</controlName>
+
+       <controlDefaultParams></controlDefaultParams>
+
+    </defaultActiveX>
+  </listMachInfo>
+</mos>
+
+ 
+
+This is an example of a device acting as a NCS and a MOS and its reply to the reqMachInfo message
+<mos>
+  <mosID>aircache.newscenter.com</mosID>
+  <ncsID>ncs.newscenter.com</ncsID>
+
+  <messageID>6331</messageID>
+  <listMachInfo>
+    <manufacturer>RadioVision, Ltd.</manufacturer>
+    <model>TCS6000</model>
+    <hwRev></hwRev>
+    <swRev>2.1.0.37</swRev>
+    <DOM></DOM>
+    <SN>927748927</SN>
+    <ID>airchache.newscenter.com</ID>
+    <time>2009-04-11T17:20:42</time>
+    <opTime>2009-03-01T23:55:10</opTime>
+    <mosRev>2.8.2</mosRev>
+
+    <supportedProfiles deviceType="MOS">
+
+      <mosProfile number="0">YES</mosProfile>
+
+<mosProfile number="1">YES</mosProfile>
+
+<mosProfile number="2">YES</mosProfile>
+
+<mosProfile number="3">YES</mosProfile>
+
+<mosProfile number="4">YES</mosProfile>
+
+<mosProfile number="5">YES</mosProfile>
+
+<mosProfile number="6">YES</mosProfile>
+
+<mosProfile number="7">YES</mosProfile>
+
+    </supportedProfiles>
+
+    <supportedProfiles deviceType="NCS">
+
+      <mosProfile number="0">YES</mosProfile>
+
+<mosProfile number="1">YES</mosProfile>
+
+<mosProfile number="2">YES</mosProfile>
+
+<mosProfile number="3">YES</mosProfile>
+
+<mosProfile number="4">YES</mosProfile>
+
+<mosProfile number="5">YES</mosProfile>
+
+<mosProfile number="6">YES</mosProfile>
+
+<mosProfile number="7">YES</mosProfile>
+
+    </supportedProfiles>
+
+       <defaultActiveX>
+
+       <mode>CONTAINED</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>Contained Control</controlSlug>
+
+       <controlName>contained.containedCTRL.1</controlName>
+
+       <controlDefaultParams>URL=http://containedcontrolpage.com</controlDefaultParams>
+
+    </defaultActiveX>
+
+    <defaultActiveX>
+
+       <mode>MODAL</mode>
+
+       <controlFileLocation>\\MOSDEVICE\Controls\</controlFileLocation>
+
+       <controlSlug>MODAL Control</controlSlug>
+
+       <controlName>modal.modalCTRL.1</controlName>
+
+       <controlDefaultParams></controlDefaultParams>
+
+    </defaultActiveX>
+  </listMachInfo>
+</mos>
