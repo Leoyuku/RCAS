@@ -1,6 +1,14 @@
-import { MosConnection, MosDevice, getMosTypes } from './connector/MosConnection';
+import { MosConnection } from './connector/MosConnection';
+import { MosDevice } from './connector/MosDevice';
+import { getMosTypes, IMOSString128 } from './internals/mosTypes';
+// 来自 connector 的接口（连接行为相关）
 import { IConnectionConfig } from './connector/api';
+// 来自 internals 的数据模型（MOS 协议数据结构）
 import {
+    IMOSAckStatus,
+    IMOSRequestObjectList,
+    IMOSObjectList,
+    IMOSListSearchableSchema,
     IMOSListMachInfo,
     IMOSObject,
     IMOSRunningOrder,
@@ -14,15 +22,10 @@ import {
     IMOSItemAction,
     IMOSItem,
     IMOSROAction,
-    IMOSString128,
     IMOSROFullStory,
     IMOSROAck,
     IMOSAck,
-    IMOSAckStatus,
-    IMOSRequestObjectList,
-    IMOSObjectList,
-    IMOSListSearchableSchema,
-} from './connector/api';
+} from './internals/model';
 
 const mosTypes = getMosTypes(true);
 
@@ -91,6 +94,20 @@ export class MosConnector {
 
     async init() {
         await this.mosConnection.init();
+
+        // 主动连接 quick-mos（联调用，生产环境按实际 NCS 地址配置）
+        await this.mosConnection.connect({
+            primary: {
+                id: 'quick.mos',       // quick-mos 的 mosID
+                host: '127.0.0.1',
+                ports: {
+                    lower: 11540,      // quick-mos 监听的端口
+                    upper: 11541,
+                    query: 11542,
+                },
+            },
+        });
+
         console.log('MosConnector: MOS Connection initialized, listening for NCS connections.');
     }
 
