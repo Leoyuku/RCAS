@@ -5,9 +5,9 @@
  */
 
 import { z } from 'zod';
-import { Rundown as MosRundown } from '../models/mos-model';
-import { Rundown as ValidatedRundown } from '../models/rundown-model';
-import { Timeline } from '../models/timeline-model';
+
+import { IRundown as ValidatedRundown } from '../models/rundown-model';
+import { ITimeline as Timeline } from '../models/timeline-model';
 
 // --- Zod Schemas for Event Payloads ---
 // 我们为每一个事件的 payload 定义一个 Zod schema，以实现运行时的验证（可选，但推荐）

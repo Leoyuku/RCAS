@@ -1,0 +1,21 @@
+import { MosMessage } from '../MosMessage'
+import * as XMLBuilder from 'xmlbuilder'
+import { IMOSListSearchableSchema } from '../../../internals'
+import { XMLMosListSearchableSchema } from './xmlConversion'
+
+export class MosListSearchableSchema extends MosMessage {
+	private options: IMOSListSearchableSchema
+
+	constructor(options: IMOSListSearchableSchema, strict: boolean) {
+		super('query', strict)
+		this.options = options
+	}
+
+	get messageXMLBlocks(): XMLBuilder.XMLElement {
+		const xml = XMLBuilder.create('mosListSearchableSchema')
+
+		XMLMosListSearchableSchema.toXML(xml, this.options, this.strict)
+
+		return xml
+	}
+}

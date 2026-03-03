@@ -1,0 +1,46 @@
+{
+    "name": "rcas",
+    "version": "1.0.0",
+    "description": "Rundown Control Automation System",
+    "scripts": {
+        "start": "ts-node packages/backend/src/index.ts",
+        "test": "jest",
+"build": "tsc"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.25.3",
+        "@modelcontextprotocol/server-filesystem": "^2026.1.14",
+        "@modelcontextprotocol/server-sequential-thinking": "^2025.12.18",
+        "axios": "^1.13.3",
+        "cheerio": "^1.2.0",
+        "cors": "^2.8.5",
+        "dotenv": "^17.2.3",
+        "eventemitter3": "^5.0.4",
+        "express": "^5.2.1",
+        "fast-xml-parser": "^4.5.3",
+        "iconv-lite": "^0.7.2",
+        "socket.io": "^4.8.3",
+        "winston": "^3.19.0",
+        "ws": "^8.19.0",
+        "xml-js": "^1.6.11",
+        "xml2js": "^0.6.2",
+        "xmlbuilder": "^15.1.1",
+        "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.19",
+        "@types/dotenv": "^6.1.1",
+        "@types/express": "^5.0.6",
+        "@types/jest": "^30.0.0",
+        "@types/node": "^18.0.0",
+        "@types/socket.io": "^3.0.1",
+        "@types/ws": "^8.18.1",
+        "@types/xml-js": "^1.0.0",
+        "@types/xml2js": "^0.4.14",
+        "@types/xmlbuilder": "^11.0.1",
+        "jest": "^30.2.0",
+        "ts-jest": "^29.4.6",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.9.3"
+    }
+}

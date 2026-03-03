@@ -1,0 +1,19 @@
+import { IMOSRequestObjectList } from '../../../internals'
+import { MosMessage } from '../MosMessage'
+import * as XMLBuilder from 'xmlbuilder'
+import { XMLMosRequestObjectList } from './xmlConversion'
+
+export class MosReqObjList extends MosMessage {
+	private options: IMOSRequestObjectList
+
+	constructor(options: IMOSRequestObjectList, strict: boolean) {
+		super('query', strict)
+		this.options = options
+	}
+
+	get messageXMLBlocks(): XMLBuilder.XMLElement {
+		const xmlMosReqObjList = XMLBuilder.create('mosReqObjList')
+		XMLMosRequestObjectList.toXML(xmlMosReqObjList, this.options, this.strict)
+		return xmlMosReqObjList
+	}
+}
