@@ -1,50 +1,63 @@
 /**
  * @fileoverview JSON 文件持久化层
  *
- * 职责：
- * - 将 RunningOrder 数据异步写入 JSON 文件
- * - 启动时从磁盘恢复数据
- * - 支持手动导入单个 JSON 文件（即时加载）
+ * 功能：
+ * - 将 RunningOrder 异步写入 JSON 文件（带防抖，防止高频 IO）
+ * - 启动时从磁盘恢复全部 RO
+ * - 支持即时加载单个 JSON 文件（运维手动导入场景）
+ * - 维护 _index.json 索引文件，方便快速查看当前有哪些 RO
  *
  * 文件结构：
  *   data/rundowns/
- *     ├── {roID}.json        每个 RO 单独一个文件
- *     └── _index.json        所有 RO 的 ID 索引
+ *     ├── {safe_roID}.json    每个 RO 单独一个文件
+ *     └── _index.json         RO ID 索引（自动维护）
+ *
+ * JSON 文件格式（SerializedRunningOrder）：
+ *   {
+ *     "roID":    "string",
+ *     "roSlug":  "string",
+ *     "savedAt": "ISO 时间戳",
+ *     "data":    { ...IMOSRunningOrder 原始数据 }
+ *   }
+ *
+ * 兼容格式：loadSingleROFromFile 同时支持上述格式和裸 IMOSRunningOrder 格式，
+ * 方便运维人员手动制作导入文件。
  */
 
-import * as fs from 'fs';
+import * as fs   from 'fs';
 import * as path from 'path';
 import { IMOSRunningOrder } from '../modules/1_mos_connection/internals/model';
-import { getMosTypes } from '../modules/1_mos_connection/internals/mosTypes';
-import { logger } from './logger';
+import { getMosTypes }      from '../modules/1_mos_connection/internals/mosTypes';
+import { logger }           from './logger';
 
-const mosTypes = getMosTypes(false); // 持久化层用非严格模式，容错优先
+const mosTypes = getMosTypes(false);
 
-// ─── 常量 ────────────────────────────────────────────────────────────────────
+// ─── 常量 ─────────────────────────────────────────────────────────────────────
 
-const DATA_DIR = path.resolve(process.cwd(), 'data', 'rundowns');
-const INDEX_FILE = path.join(DATA_DIR, '_index.json');
+const DATA_DIR    = path.resolve(process.cwd(), 'data', 'rundowns');
+const INDEX_FILE  = path.join(DATA_DIR, '_index.json');
+const WRITE_DEBOUNCE_MS = 500; // 500ms 防抖，合并高频小变更
 
-// 写入防抖：同一个 RO 在 500ms 内多次变更，只写一次磁盘
-const WRITE_DEBOUNCE_MS = 500;
+// ─── 类型 ─────────────────────────────────────────────────────────────────────
 
-// ─── 类型定义 ────────────────────────────────────────────────────────────────
-
-/** 磁盘上存储的 RO 格式（IMOSString128 序列化为普通字符串） */
 export type SerializedRunningOrder = {
-    roID: string;
-    roSlug: string;
-    savedAt: string; // ISO 时间戳
-    data: object;    // 原始 RO 数据（JSON 可序列化）
+    roID:    string;
+    roSlug:  string;
+    savedAt: string;
+    data:    object;
 };
 
-export type IndexFile = {
-    version: number;
+type IndexFile = {
+    version:   number;
     updatedAt: string;
-    roIDs: string[];
+    roIDs:     string[];
 };
 
-// ─── 辅助函数 ────────────────────────────────────────────────────────────────
+// ─── 内部状态 ─────────────────────────────────────────────────────────────────
+
+const _writeTimers: Map<string, NodeJS.Timeout> = new Map();
+
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
 function ensureDataDir(): void {
     if (!fs.existsSync(DATA_DIR)) {
@@ -54,41 +67,24 @@ function ensureDataDir(): void {
 }
 
 function roFilePath(roID: string): string {
-    // 文件名中替换非法字符，保留可读性
     const safeName = roID.replace(/[^a-zA-Z0-9_\-]/g, '_');
     return path.join(DATA_DIR, `${safeName}.json`);
 }
 
-function serializeRO(ro: IMOSRunningOrder): SerializedRunningOrder {
-    const roID = mosTypes.mosString128.stringify(ro.ID!);
-    const roSlug = mosTypes.mosString128.stringify(ro.Slug);
-    return {
-        roID,
-        roSlug,
-        savedAt: new Date().toISOString(),
-        data: ro as unknown as object,
-    };
-}
-
-// ─── 写入防抖 Map ─────────────────────────────────────────────────────────────
-
-const _writeTimers: Map<string, NodeJS.Timeout> = new Map();
-
-// ─── 公开 API ─────────────────────────────────────────────────────────────────
+// ─── 公开 API ──────────────────────────────────────────────────────────────────
 
 /**
- * 异步写入单个 RO 到磁盘（带防抖）
- * 在高频更新场景下（如 roReplaceStory 连续推送），
- * 防止每次小变更都触发磁盘 IO。
+ * 异步持久化单个 RO（防抖）
+ * 同一个 RO 在 500ms 内多次变更，只触发一次磁盘写入。
+ * 适用于 NCS 高频推送 roReplaceStory 等场景。
  */
 export function persistRO(ro: IMOSRunningOrder): void {
     const roID = mosTypes.mosString128.stringify(ro.ID!);
 
-    // 清除上一个待写入的定时器
     const existing = _writeTimers.get(roID);
     if (existing) clearTimeout(existing);
 
-    // 深拷贝，避免定时器触发时数据已被修改
+    // 深拷贝快照，防止定时器触发时数据已被修改
     const snapshot = JSON.parse(JSON.stringify(ro)) as IMOSRunningOrder;
 
     const timer = setTimeout(() => {
@@ -100,9 +96,16 @@ export function persistRO(ro: IMOSRunningOrder): void {
 }
 
 /**
- * 立即删除某个 RO 的持久化文件
+ * 立即删除 RO 的持久化文件
  */
 export function deletePersistedRO(roID: string): void {
+    // 取消还未触发的写入定时器
+    const existing = _writeTimers.get(roID);
+    if (existing) {
+        clearTimeout(existing);
+        _writeTimers.delete(roID);
+    }
+
     const filePath = roFilePath(roID);
     try {
         if (fs.existsSync(filePath)) {
@@ -111,17 +114,15 @@ export function deletePersistedRO(roID: string): void {
         }
         _updateIndex();
     } catch (err) {
-        logger.error(`[Persistence] Failed to delete RO file ${roID}:`, err);
+        logger.error(`[Persistence] Failed to delete RO file "${roID}":`, err);
     }
 }
 
 /**
- * 从磁盘恢复所有已持久化的 RO
- * 启动时调用，返回所有成功加载的 RO 列表
+ * 启动时从磁盘恢复所有 RO
  */
 export function loadAllPersistedROs(): IMOSRunningOrder[] {
     ensureDataDir();
-
     const results: IMOSRunningOrder[] = [];
 
     let files: string[];
@@ -136,13 +137,13 @@ export function loadAllPersistedROs(): IMOSRunningOrder[] {
     for (const file of files) {
         const filePath = path.join(DATA_DIR, file);
         try {
-            const raw = fs.readFileSync(filePath, 'utf8');
+            const raw    = fs.readFileSync(filePath, 'utf8');
             const parsed = JSON.parse(raw) as SerializedRunningOrder;
-            const ro = parsed.data as IMOSRunningOrder;
+            const ro     = parsed.data as IMOSRunningOrder;
             results.push(ro);
-            logger.info(`[Persistence] Loaded RO: ${parsed.roID} (${parsed.roSlug}), saved at ${parsed.savedAt}`);
+            logger.info(`[Persistence] Loaded: "${parsed.roID}" ("${parsed.roSlug}"), saved ${parsed.savedAt}`);
         } catch (err) {
-            logger.warn(`[Persistence] Failed to load RO from ${file}, skipping:`, err);
+            logger.warn(`[Persistence] Failed to load "${file}", skipping:`, err);
         }
     }
 
@@ -151,28 +152,29 @@ export function loadAllPersistedROs(): IMOSRunningOrder[] {
 }
 
 /**
- * 即时加载单个 JSON 文件（手动导入场景）
- * 运维人员将 RO 的 JSON 文件放入 data/rundowns/ 后，
- * 可通过此方法立即加载，无需重启。
+ * 即时加载单个 JSON 文件（运维手动导入）
+ * 支持两种格式：
+ *   1. SerializedRunningOrder（系统自动保存的格式）
+ *   2. 裸 IMOSRunningOrder（运维手动编写的格式）
  */
 export function loadSingleROFromFile(filePath: string): IMOSRunningOrder | null {
     try {
-        const raw = fs.readFileSync(filePath, 'utf8');
+        const raw    = fs.readFileSync(filePath, 'utf8');
         const parsed = JSON.parse(raw);
 
-        // 兼容两种格式：SerializedRunningOrder 或直接的 IMOSRunningOrder
+        // 兼容两种格式
         const ro: IMOSRunningOrder = parsed.data ?? parsed;
 
         if (!ro.ID || !ro.Slug) {
-            logger.warn(`[Persistence] File ${filePath} is missing required fields (ID, Slug), skipping.`);
+            logger.warn(`[Persistence] File "${filePath}" missing required fields (ID, Slug).`);
             return null;
         }
 
         const roID = mosTypes.mosString128.stringify(ro.ID);
-        logger.info(`[Persistence] Manually loaded RO: ${roID} from ${filePath}`);
+        logger.info(`[Persistence] Manually loaded RO: "${roID}" from "${filePath}"`);
         return ro;
     } catch (err) {
-        logger.error(`[Persistence] Failed to load file ${filePath}:`, err);
+        logger.error(`[Persistence] Failed to load file "${filePath}":`, err);
         return null;
     }
 }
@@ -182,14 +184,18 @@ export function loadSingleROFromFile(filePath: string): IMOSRunningOrder | null 
 function _writeROToDisk(roID: string, ro: IMOSRunningOrder): void {
     ensureDataDir();
     const filePath = roFilePath(roID);
-
     try {
-        const serialized = serializeRO(ro);
+        const serialized: SerializedRunningOrder = {
+            roID,
+            roSlug:  mosTypes.mosString128.stringify(ro.Slug),
+            savedAt: new Date().toISOString(),
+            data:    ro as unknown as object,
+        };
         fs.writeFileSync(filePath, JSON.stringify(serialized, null, 2), 'utf8');
-        logger.debug(`[Persistence] Written RO to disk: ${roID}`);
+        logger.debug(`[Persistence] Written: "${roID}"`);
         _updateIndex();
     } catch (err) {
-        logger.error(`[Persistence] Failed to write RO ${roID} to disk:`, err);
+        logger.error(`[Persistence] Failed to write "${roID}":`, err);
     }
 }
 
@@ -197,15 +203,13 @@ function _updateIndex(): void {
     try {
         const files = fs.readdirSync(DATA_DIR)
             .filter(f => f.endsWith('.json') && !f.startsWith('_'));
-
-        const roIDs = files.map(f => path.basename(f, '.json'));
         const index: IndexFile = {
-            version: 1,
+            version:   1,
             updatedAt: new Date().toISOString(),
-            roIDs,
+            roIDs:     files.map(f => path.basename(f, '.json')),
         };
         fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2), 'utf8');
     } catch (err) {
-        logger.warn('[Persistence] Failed to update index file:', err);
+        logger.warn('[Persistence] Failed to update index:', err);
     }
 }

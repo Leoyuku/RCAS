@@ -1,17 +1,12 @@
 /**
- * @fileoverview RundownStore — 核心状态管理器
- *
- * 职责：
- * - 内存中维护所有 Running Order 的完整状态
- * - 处理来自 NCS 的所有 MOS Profile 2 消息（增删改）
- * - 每次状态变更后异步持久化到 JSON 文件
- * - 启动时从持久化文件恢复状态
- * - 对外提供只读查询接口（供 REST API、WebSocket 使用）
+ * @fileoverview RundownStore — 节目单核心状态管理器
  *
  * 设计原则：
- * - 所有写操作必须通过本类方法进行，禁止外部直接修改内存数据
- * - 写操作同步完成（内存），持久化异步进行（磁盘），不阻塞 MOS 回调
- * - 每个写操作都通过 EventEmitter 通知外部订阅者（如 WebSocket 推送）
+ * - 内存为主（毫秒级读写），磁盘为辅（异步持久化）
+ * - 所有写操作通过本类方法进行，禁止外部直接修改
+ * - 写操作同步完成（内存），持久化异步进行（不阻塞 MOS 回调）
+ * - 每次变更通过 EventEmitter 通知订阅者（WebSocket 实时推送）
+ * - 严格遵循 MOS 协议 3.6.12 roElementAction 语义
  */
 
 import { EventEmitter } from 'eventemitter3';
@@ -31,49 +26,32 @@ import {
     IMOSObjectAirStatus,
 } from '../modules/1_mos_connection/internals/model';
 import { getMosTypes } from '../modules/1_mos_connection/internals/mosTypes';
-import {
-    persistRO,
-    deletePersistedRO,
-    loadAllPersistedROs,
-} from './json-persistence';
+import { persistRO, deletePersistedRO, loadAllPersistedROs } from './json-persistence';
 import { logger } from './logger';
 
 const mosTypes = getMosTypes(false);
 
-// ─── 事件类型定义 ────────────────────────────────────────────────────────────
+// ─── 事件类型 ─────────────────────────────────────────────────────────────────
 
 export interface RundownStoreEvents {
-    /** RO 被创建 */
-    roCreated: (roID: string, ro: IMOSRunningOrder) => void;
-    /** RO 被替换（完整更新） */
-    roReplaced: (roID: string, ro: IMOSRunningOrder) => void;
-    /** RO 被删除 */
-    roDeleted: (roID: string) => void;
-    /** RO 元数据更新 */
-    roMetadataUpdated: (roID: string) => void;
-    /** RO 播出状态变更 */
-    roStatusChanged: (roID: string, status: string) => void;
-    /** RO 上播状态变更 */
-    roReadyToAirChanged: (roID: string, airStatus: IMOSObjectAirStatus) => void;
-    /** Story 层面变更 */
-    storyChanged: (roID: string, changeType: string) => void;
-    /** 从磁盘恢复完成 */
-    restored: (count: number) => void;
+    roCreated:          (roID: string, ro: IMOSRunningOrder) => void;
+    roReplaced:         (roID: string, ro: IMOSRunningOrder) => void;
+    roDeleted:          (roID: string) => void;
+    roMetadataUpdated:  (roID: string) => void;
+    roStatusChanged:    (roID: string, status: string) => void;
+    roReadyToAirChanged:(roID: string, airStatus: IMOSObjectAirStatus) => void;
+    storyChanged:       (roID: string, changeType: string) => void;
+    restored:           (count: number) => void;
 }
 
-// ─── RundownStore 类 ──────────────────────────────────────────────────────────
+// ─── RundownStore ─────────────────────────────────────────────────────────────
 
 export class RundownStore extends EventEmitter<RundownStoreEvents> {
 
-    /** 主存储：roID → IMOSRunningOrder */
     private _rundowns: Map<string, IMOSRunningOrder> = new Map();
 
     // ── 初始化 ────────────────────────────────────────────────────────────────
 
-    /**
-     * 从磁盘恢复持久化数据
-     * 在 MOS 连接建立之前调用，确保 NCS 推送时数据层已就绪
-     */
     async restore(): Promise<void> {
         const persisted = loadAllPersistedROs();
         for (const ro of persisted) {
@@ -84,367 +62,367 @@ export class RundownStore extends EventEmitter<RundownStoreEvents> {
         this.emit('restored', persisted.length);
     }
 
-    // ── 查询接口（只读） ──────────────────────────────────────────────────────
+    // ── 只读查询 ──────────────────────────────────────────────────────────────
 
-    /** 获取所有 RO（返回副本，防止外部修改） */
     getAllRundowns(): IMOSRunningOrder[] {
         return Array.from(this._rundowns.values()).map(ro =>
             JSON.parse(JSON.stringify(ro))
         );
     }
 
-    /** 获取单个 RO */
     getRundown(roID: string): IMOSRunningOrder | undefined {
         const ro = this._rundowns.get(roID);
         return ro ? JSON.parse(JSON.stringify(ro)) : undefined;
     }
 
-    /** 获取当前 RO 数量 */
-    get count(): number {
-        return this._rundowns.size;
-    }
+    get count(): number { return this._rundowns.size; }
 
-    /** 获取所有 RO 的 ID 列表 */
-    getAllIDs(): string[] {
-        return Array.from(this._rundowns.keys());
-    }
+    getAllIDs(): string[] { return Array.from(this._rundowns.keys()); }
 
-    // ── Profile 2 写操作 ──────────────────────────────────────────────────────
+    getAllRunningOrdersForNCS(): IMOSRunningOrder[] { return this.getAllRundowns(); }
 
-    /** roCreate：NCS 创建新节目单 */
+    // ── RO 级别操作 ───────────────────────────────────────────────────────────
+
     handleCreateRunningOrder(ro: IMOSRunningOrder): void {
         const roID = mosTypes.mosString128.stringify(ro.ID!);
-
         if (this._rundowns.has(roID)) {
-            logger.warn(`[RundownStore] roCreate: RO ${roID} already exists, overwriting.`);
+            logger.warn(`[RundownStore] roCreate: "${roID}" already exists, overwriting.`);
         }
-
         this._rundowns.set(roID, ro);
         persistRO(ro);
-        logger.info(`[RundownStore] Created RO: ${roID} "${mosTypes.mosString128.stringify(ro.Slug)}", stories: ${ro.Stories.length}`);
+        logger.info(`[RundownStore] Created RO: "${roID}" "${mosTypes.mosString128.stringify(ro.Slug)}", stories: ${ro.Stories.length}`);
         this.emit('roCreated', roID, ro);
     }
 
-    /** roReplace：NCS 完整替换节目单 */
     handleReplaceRunningOrder(ro: IMOSRunningOrder): void {
         const roID = mosTypes.mosString128.stringify(ro.ID!);
-
         if (!this._rundowns.has(roID)) {
-            logger.warn(`[RundownStore] roReplace: RO ${roID} not found, creating instead.`);
+            logger.warn(`[RundownStore] roReplace: "${roID}" not found, creating.`);
         }
-
         this._rundowns.set(roID, ro);
         persistRO(ro);
-        logger.info(`[RundownStore] Replaced RO: ${roID}, stories: ${ro.Stories.length}`);
+        logger.info(`[RundownStore] Replaced RO: "${roID}", stories: ${ro.Stories.length}`);
         this.emit('roReplaced', roID, ro);
     }
 
-    /** roDelete：NCS 删除节目单 */
     handleDeleteRunningOrder(roID: string): void {
         if (!this._rundowns.has(roID)) {
-            logger.warn(`[RundownStore] roDelete: RO ${roID} not found, ignoring.`);
+            logger.warn(`[RundownStore] roDelete: "${roID}" not found, ignoring.`);
             return;
         }
-
         this._rundowns.delete(roID);
         deletePersistedRO(roID);
-        logger.info(`[RundownStore] Deleted RO: ${roID}`);
+        logger.info(`[RundownStore] Deleted RO: "${roID}"`);
         this.emit('roDeleted', roID);
     }
 
-    /** roMetadataReplace：更新 RO 元数据（不含 Stories） */
     handleMetadataReplace(roBase: IMOSRunningOrderBase): void {
         const roID = mosTypes.mosString128.stringify(roBase.ID);
         const existing = this._rundowns.get(roID);
-
         if (!existing) {
-            logger.warn(`[RundownStore] roMetadataReplace: RO ${roID} not found, ignoring.`);
+            logger.warn(`[RundownStore] roMetadataReplace: "${roID}" not found.`);
             return;
         }
-
-        // 只更新元数据字段，保留 Stories
         const updated: IMOSRunningOrder = {
             ...existing,
-            Slug: roBase.Slug,
-            DefaultChannel: roBase.DefaultChannel,
-            EditorialStart: roBase.EditorialStart,
-            EditorialDuration: roBase.EditorialDuration,
-            Trigger: roBase.Trigger,
-            MacroIn: roBase.MacroIn,
-            MacroOut: roBase.MacroOut,
+            Slug:               roBase.Slug,
+            DefaultChannel:     roBase.DefaultChannel,
+            EditorialStart:     roBase.EditorialStart,
+            EditorialDuration:  roBase.EditorialDuration,
+            Trigger:            roBase.Trigger,
+            MacroIn:            roBase.MacroIn,
+            MacroOut:           roBase.MacroOut,
             MosExternalMetaData: roBase.MosExternalMetaData,
         };
-
         this._rundowns.set(roID, updated);
         persistRO(updated);
-        logger.info(`[RundownStore] Updated metadata for RO: ${roID}`);
+        logger.info(`[RundownStore] Metadata updated: "${roID}"`);
         this.emit('roMetadataUpdated', roID);
     }
 
-    /** roStatus：RO 播出状态更新 */
     handleRunningOrderStatus(status: IMOSRunningOrderStatus): void {
         const roID = mosTypes.mosString128.stringify(status.ID);
-        logger.info(`[RundownStore] RO status: ${roID} → ${status.Status}`);
+        logger.info(`[RundownStore] RO status: "${roID}" → ${status.Status}`);
         this.emit('roStatusChanged', roID, status.Status);
-        // 状态是实时信息，不持久化（重启后由 NCS 重新推送）
+        // 播出状态为实时信息，不持久化，重启后由 NCS 重新推送
     }
 
-    /** roReadyToAir：RO 上播状态 */
     handleReadyToAir(data: IMOSROReadyToAir): void {
         const roID = mosTypes.mosString128.stringify(data.ID);
-        logger.info(`[RundownStore] RO ready-to-air: ${roID} → ${data.Status}`);
+        logger.info(`[RundownStore] Ready-to-air: "${roID}" → ${data.Status}`);
         this.emit('roReadyToAirChanged', roID, data.Status);
     }
 
-    /** storyStatus：Story 播出状态 */
     handleStoryStatus(status: IMOSStoryStatus): void {
-        const roID = mosTypes.mosString128.stringify(status.RunningOrderId);
+        const roID    = mosTypes.mosString128.stringify(status.RunningOrderId);
         const storyID = mosTypes.mosString128.stringify(status.ID);
-        logger.debug(`[RundownStore] Story status: ${roID}/${storyID} → ${status.Status}`);
+        logger.debug(`[RundownStore] Story status: "${roID}"/"${storyID}" → ${status.Status}`);
         this.emit('storyChanged', roID, 'status');
     }
 
-    /** itemStatus：Item 播出状态 */
     handleItemStatus(status: IMOSItemStatus): void {
-        const roID = mosTypes.mosString128.stringify(status.RunningOrderId);
+        const roID    = mosTypes.mosString128.stringify(status.RunningOrderId);
         const storyID = mosTypes.mosString128.stringify(status.StoryId);
-        const itemID = mosTypes.mosString128.stringify(status.ID);
-        logger.debug(`[RundownStore] Item status: ${roID}/${storyID}/${itemID} → ${status.Status}`);
+        const itemID  = mosTypes.mosString128.stringify(status.ID);
+        logger.debug(`[RundownStore] Item status: "${roID}"/"${storyID}"/"${itemID}" → ${status.Status}`);
     }
 
-    // ── Story 级别操作 ────────────────────────────────────────────────────────
+    // ── Story 级别操作（MOS 3.6.12 roElementAction）──────────────────────────
+    //
+    // INSERT：element_target.storyID = 插入到此 story 之前（找不到则追加末尾）
+    // REPLACE：element_target.storyID = 被替换的 story
+    // MOVE：element_target.storyID = 移动到此 story 之前（找不到则追加末尾）
+    // DELETE：无 element_target，直接删除 source 里的 storyID
+    // SWAP：无 element_target，交换 source 里的两个 storyID
 
-    /** roInsertStories：插入到 target story 之前 */
     handleROInsertStories(action: IMOSStoryAction, stories: IMOSROStory[]): void {
         const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roInsertStories: RO ${roID} not found`); return; }
-    
+        const ro   = this._getRundownOrWarn(roID, 'roInsertStories');
+        if (!ro) return;
+
         const insertBeforeID = mosTypes.mosString128.stringify(action.StoryID);
-        const insertIdx = insertBeforeID
-            ? ro.Stories.findIndex(s => mosTypes.mosString128.stringify(s.ID) === insertBeforeID)
-            : ro.Stories.length; // 找不到目标则追加到末尾
-        
-        const finalIdx = insertIdx === -1 ? ro.Stories.length : insertIdx;
-        ro.Stories.splice(finalIdx, 0, ...stories);
+        const insertIdx = this._findInsertBeforeIdx(
+            ro.Stories, s => mosTypes.mosString128.stringify(s.ID), insertBeforeID, roID, 'roInsertStories'
+        );
+
+        ro.Stories.splice(insertIdx, 0, ...stories);
         persistRO(ro);
-        logger.info(`[RundownStore] Inserted ${stories.length} story(s) into RO: ${roID} before position ${finalIdx}`);
+        logger.info(`[RundownStore] Inserted ${stories.length} story(s) before "${insertBeforeID}" in "${roID}"`);
         this.emit('storyChanged', roID, 'insert');
     }
-    
-    /** roReplaceStories：替换 target storyID 指定的 story */
+
     handleROReplaceStories(action: IMOSStoryAction, stories: IMOSROStory[]): void {
         const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roReplaceStories: RO ${roID} not found`); return; }
-    
+        const ro   = this._getRundownOrWarn(roID, 'roReplaceStories');
+        if (!ro) return;
+
         const targetID = mosTypes.mosString128.stringify(action.StoryID);
         const idx = ro.Stories.findIndex(s => mosTypes.mosString128.stringify(s.ID) === targetID);
         if (idx === -1) {
-            logger.warn(`[RundownStore] roReplaceStories: Target story ${targetID} not found in RO ${roID}`);
+            logger.warn(`[RundownStore] roReplaceStories: target story "${targetID}" not found in "${roID}"`);
             return;
         }
-        // 用新的 stories 替换目标位置（协议允许一对多替换）
+
         ro.Stories.splice(idx, 1, ...stories);
         persistRO(ro);
-        logger.info(`[RundownStore] Replaced story ${targetID} with ${stories.length} story(s) in RO: ${roID}`);
+        logger.info(`[RundownStore] Replaced story "${targetID}" with ${stories.length} story(s) in "${roID}"`);
         this.emit('storyChanged', roID, 'replace');
     }
-    
-    /** roMoveStories：移动到 target story 之前 */
+
     handleROMoveStories(action: IMOSStoryAction, storyIDs: string[]): void {
         const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roMoveStories: RO ${roID} not found`); return; }
-    
+        const ro   = this._getRundownOrWarn(roID, 'roMoveStories');
+        if (!ro) return;
+
         const insertBeforeID = mosTypes.mosString128.stringify(action.StoryID);
-    
-        // 先提取要移动的 stories（保持相对顺序）
-        const toMove = ro.Stories.filter(s =>
-            storyIDs.includes(mosTypes.mosString128.stringify(s.ID))
+
+        // 提取（保持相对顺序）→ 删除 → 重新插入
+        const toMove = ro.Stories.filter(s => storyIDs.includes(mosTypes.mosString128.stringify(s.ID)));
+        if (toMove.length !== storyIDs.length) {
+            logger.warn(`[RundownStore] roMoveStories: ${storyIDs.length - toMove.length} story(s) not found in "${roID}"`);
+        }
+        ro.Stories = ro.Stories.filter(s => !storyIDs.includes(mosTypes.mosString128.stringify(s.ID)));
+
+        const insertIdx = this._findInsertBeforeIdx(
+            ro.Stories, s => mosTypes.mosString128.stringify(s.ID), insertBeforeID, roID, 'roMoveStories'
         );
-        // 从原位置删除
-        ro.Stories = ro.Stories.filter(s =>
-            !storyIDs.includes(mosTypes.mosString128.stringify(s.ID))
-        );
-        // 找目标位置（删除后重新找）
-        const insertIdx = insertBeforeID
-            ? ro.Stories.findIndex(s => mosTypes.mosString128.stringify(s.ID) === insertBeforeID)
-            : ro.Stories.length;
-        const finalIdx = insertIdx === -1 ? ro.Stories.length : insertIdx;
-        ro.Stories.splice(finalIdx, 0, ...toMove);
-    
+        ro.Stories.splice(insertIdx, 0, ...toMove);
         persistRO(ro);
-        logger.info(`[RundownStore] Moved ${storyIDs.length} story(s) before ${insertBeforeID} in RO: ${roID}`);
+        logger.info(`[RundownStore] Moved ${toMove.length} story(s) before "${insertBeforeID}" in "${roID}"`);
         this.emit('storyChanged', roID, 'move');
     }
 
-    /** roDeleteStories：删除指定 Stories */
     handleRODeleteStories(action: IMOSROAction, storyIDs: string[]): void {
         const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roDeleteStories: RO ${roID} not found`); return; }
+        const ro   = this._getRundownOrWarn(roID, 'roDeleteStories');
+        if (!ro) return;
 
         const before = ro.Stories.length;
-        ro.Stories = ro.Stories.filter(s =>
-            !storyIDs.includes(mosTypes.mosString128.stringify(s.ID))
-        );
+        ro.Stories = ro.Stories.filter(s => !storyIDs.includes(mosTypes.mosString128.stringify(s.ID)));
         const deleted = before - ro.Stories.length;
 
+        if (deleted !== storyIDs.length) {
+            logger.warn(`[RundownStore] roDeleteStories: requested ${storyIDs.length}, deleted ${deleted} in "${roID}"`);
+        }
         persistRO(ro);
-        logger.info(`[RundownStore] Deleted ${deleted} story(s) from RO: ${roID}`);
+        logger.info(`[RundownStore] Deleted ${deleted} story(s) from "${roID}"`);
         this.emit('storyChanged', roID, 'delete');
     }
 
-    /** roSwapStories：交换两个 Story 的位置 */
     handleROSwapStories(action: IMOSROAction, storyID0: string, storyID1: string): void {
         const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roSwapStories: RO ${roID} not found`); return; }
+        const ro   = this._getRundownOrWarn(roID, 'roSwapStories');
+        if (!ro) return;
 
         const idx0 = ro.Stories.findIndex(s => mosTypes.mosString128.stringify(s.ID) === storyID0);
         const idx1 = ro.Stories.findIndex(s => mosTypes.mosString128.stringify(s.ID) === storyID1);
 
         if (idx0 === -1 || idx1 === -1) {
-            logger.warn(`[RundownStore] roSwapStories: Story not found in RO ${roID}`);
+            logger.warn(`[RundownStore] roSwapStories: story not found in "${roID}" (${storyID0}, ${storyID1})`);
             return;
         }
-
         [ro.Stories[idx0], ro.Stories[idx1]] = [ro.Stories[idx1], ro.Stories[idx0]];
         persistRO(ro);
-        logger.info(`[RundownStore] Swapped stories ${storyID0} ↔ ${storyID1} in RO: ${roID}`);
+        logger.info(`[RundownStore] Swapped stories "${storyID0}" ↔ "${storyID1}" in "${roID}"`);
         this.emit('storyChanged', roID, 'swap');
     }
 
-    // ── Item 级别操作 ─────────────────────────────────────────────────────────
+    // ── Item 级别操作（MOS 3.6.12 roElementAction）───────────────────────────
+    //
+    // INSERT：element_target.storyID + itemID = 所在 story 及插入到此 item 之前
+    // REPLACE：element_target.storyID + itemID = 所在 story 及被替换的 item
+    // MOVE：element_target.storyID + itemID = 所在 story 及移动到此 item 之前
+    // DELETE：element_target.storyID = 包含这些 item 的 story（action 为 IMOSStoryAction）
+    // SWAP：element_target.storyID = 包含这两个 item 的 story（action 为 IMOSStoryAction）
 
-    /** roInsertItems：插入到 target item 之前 */
     handleROInsertItems(action: IMOSItemAction, items: IMOSItem[]): void {
-        const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
+        const roID    = mosTypes.mosString128.stringify(action.RunningOrderID);
         const storyID = mosTypes.mosString128.stringify(action.StoryID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roInsertItems: RO ${roID} not found`); return; }
+        const story   = this._getStoryOrWarn(roID, storyID, 'roInsertItems');
+        if (!story) return;
 
-        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
-        if (!story) { logger.warn(`[RundownStore] roInsertItems: Story ${storyID} not found`); return; }
-
+        const ro = this._rundowns.get(roID)!;
         const insertBeforeID = mosTypes.mosString128.stringify(action.ItemID);
-        const insertIdx = insertBeforeID
-            ? story.Items.findIndex(i => mosTypes.mosString128.stringify(i.ID) === insertBeforeID)
-            : story.Items.length;
-        const finalIdx = insertIdx === -1 ? story.Items.length : insertIdx;
+        const insertIdx = this._findInsertBeforeIdx(
+            story.Items, i => mosTypes.mosString128.stringify(i.ID), insertBeforeID, storyID, 'roInsertItems'
+        );
 
-        story.Items.splice(finalIdx, 0, ...items);
+        story.Items.splice(insertIdx, 0, ...items);
         persistRO(ro);
-        logger.info(`[RundownStore] Inserted ${items.length} item(s) before ${insertBeforeID} in story ${storyID}`);
+        logger.info(`[RundownStore] Inserted ${items.length} item(s) before "${insertBeforeID}" in story "${storyID}"`);
         this.emit('storyChanged', roID, 'itemInsert');
     }
 
-    /** roReplaceItems：替换 target itemID 指定的 item */
     handleROReplaceItems(action: IMOSItemAction, items: IMOSItem[]): void {
-        const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
+        const roID    = mosTypes.mosString128.stringify(action.RunningOrderID);
         const storyID = mosTypes.mosString128.stringify(action.StoryID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roReplaceItems: RO ${roID} not found`); return; }
+        const story   = this._getStoryOrWarn(roID, storyID, 'roReplaceItems');
+        if (!story) return;
 
-        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
-        if (!story) { logger.warn(`[RundownStore] roReplaceItems: Story ${storyID} not found`); return; }
-
+        const ro = this._rundowns.get(roID)!;
         const targetID = mosTypes.mosString128.stringify(action.ItemID);
         const idx = story.Items.findIndex(i => mosTypes.mosString128.stringify(i.ID) === targetID);
         if (idx === -1) {
-            logger.warn(`[RundownStore] roReplaceItems: Target item ${targetID} not found`);
+            logger.warn(`[RundownStore] roReplaceItems: target item "${targetID}" not found in story "${storyID}"`);
             return;
         }
+
         story.Items.splice(idx, 1, ...items);
         persistRO(ro);
-        logger.info(`[RundownStore] Replaced item ${targetID} with ${items.length} item(s) in story ${storyID}`);
+        logger.info(`[RundownStore] Replaced item "${targetID}" with ${items.length} item(s) in story "${storyID}"`);
         this.emit('storyChanged', roID, 'itemReplace');
     }
 
-    /** roMoveItems：移动到 target item 之前，在 target story 内 */
     handleROMoveItems(action: IMOSItemAction, itemIDs: string[]): void {
-        const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
+        const roID    = mosTypes.mosString128.stringify(action.RunningOrderID);
         const storyID = mosTypes.mosString128.stringify(action.StoryID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roMoveItems: RO ${roID} not found`); return; }
+        const story   = this._getStoryOrWarn(roID, storyID, 'roMoveItems');
+        if (!story) return;
 
-        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
-        if (!story) { logger.warn(`[RundownStore] roMoveItems: Story ${storyID} not found`); return; }
-
+        const ro = this._rundowns.get(roID)!;
         const insertBeforeID = mosTypes.mosString128.stringify(action.ItemID);
+
         const toMove = story.Items.filter(i => itemIDs.includes(mosTypes.mosString128.stringify(i.ID)));
+        if (toMove.length !== itemIDs.length) {
+            logger.warn(`[RundownStore] roMoveItems: ${itemIDs.length - toMove.length} item(s) not found in story "${storyID}"`);
+        }
         story.Items = story.Items.filter(i => !itemIDs.includes(mosTypes.mosString128.stringify(i.ID)));
 
-        const insertIdx = insertBeforeID
-            ? story.Items.findIndex(i => mosTypes.mosString128.stringify(i.ID) === insertBeforeID)
-            : story.Items.length;
-        const finalIdx = insertIdx === -1 ? story.Items.length : insertIdx;
-        story.Items.splice(finalIdx, 0, ...toMove);
-
+        const insertIdx = this._findInsertBeforeIdx(
+            story.Items, i => mosTypes.mosString128.stringify(i.ID), insertBeforeID, storyID, 'roMoveItems'
+        );
+        story.Items.splice(insertIdx, 0, ...toMove);
         persistRO(ro);
-        logger.info(`[RundownStore] Moved ${itemIDs.length} item(s) before ${insertBeforeID} in story ${storyID}`);
+        logger.info(`[RundownStore] Moved ${toMove.length} item(s) before "${insertBeforeID}" in story "${storyID}"`);
         this.emit('storyChanged', roID, 'itemMove');
     }
 
-    /** roDeleteItems：删除 target story 内的指定 items */
     handleRODeleteItems(action: IMOSStoryAction, itemIDs: string[]): void {
-        const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
+        const roID    = mosTypes.mosString128.stringify(action.RunningOrderID);
         const storyID = mosTypes.mosString128.stringify(action.StoryID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roDeleteItems: RO ${roID} not found`); return; }
+        const story   = this._getStoryOrWarn(roID, storyID, 'roDeleteItems');
+        if (!story) return;
 
-        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
-        if (!story) { logger.warn(`[RundownStore] roDeleteItems: Story ${storyID} not found`); return; }
-
+        const ro = this._rundowns.get(roID)!;
+        const before = story.Items.length;
         story.Items = story.Items.filter(i => !itemIDs.includes(mosTypes.mosString128.stringify(i.ID)));
+        const deleted = before - story.Items.length;
+
+        if (deleted !== itemIDs.length) {
+            logger.warn(`[RundownStore] roDeleteItems: requested ${itemIDs.length}, deleted ${deleted} in story "${storyID}"`);
+        }
         persistRO(ro);
-        logger.info(`[RundownStore] Deleted ${itemIDs.length} item(s) from story ${storyID}`);
+        logger.info(`[RundownStore] Deleted ${deleted} item(s) from story "${storyID}"`);
         this.emit('storyChanged', roID, 'itemDelete');
     }
 
-    /** roSwapItems：交换 target story 内的两个 items */
-    // action 类型是 IMOSStoryAction（只含 storyID，协议里 element_target 只有 storyID）
     handleROSwapItems(action: IMOSStoryAction, itemID0: string, itemID1: string): void {
-        const roID = mosTypes.mosString128.stringify(action.RunningOrderID);
+        const roID    = mosTypes.mosString128.stringify(action.RunningOrderID);
         const storyID = mosTypes.mosString128.stringify(action.StoryID);
-        const ro = this._rundowns.get(roID);
-        if (!ro) { logger.warn(`[RundownStore] roSwapItems: RO ${roID} not found`); return; }
+        const story   = this._getStoryOrWarn(roID, storyID, 'roSwapItems');
+        if (!story) return;
 
-        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
-        if (!story) { logger.warn(`[RundownStore] roSwapItems: Story ${storyID} not found`); return; }
-
+        const ro = this._rundowns.get(roID)!;
         const idx0 = story.Items.findIndex(i => mosTypes.mosString128.stringify(i.ID) === itemID0);
         const idx1 = story.Items.findIndex(i => mosTypes.mosString128.stringify(i.ID) === itemID1);
+
         if (idx0 === -1 || idx1 === -1) {
-            logger.warn(`[RundownStore] roSwapItems: Item not found in story ${storyID}`);
+            logger.warn(`[RundownStore] roSwapItems: item not found in story "${storyID}" (${itemID0}, ${itemID1})`);
             return;
         }
         [story.Items[idx0], story.Items[idx1]] = [story.Items[idx1], story.Items[idx0]];
         persistRO(ro);
-        logger.info(`[RundownStore] Swapped items ${itemID0} ↔ ${itemID1} in story ${storyID}`);
+        logger.info(`[RundownStore] Swapped items "${itemID0}" ↔ "${itemID1}" in story "${storyID}"`);
         this.emit('storyChanged', roID, 'itemSwap');
     }
 
     // ── Profile 4 ─────────────────────────────────────────────────────────────
 
-    /** roReqAll 回应：返回当前所有 RO */
-    getAllRunningOrdersForNCS(): IMOSRunningOrder[] {
-        return this.getAllRundowns();
+    handleRunningOrderStory(story: IMOSROFullStory): void {
+        const roID    = mosTypes.mosString128.stringify(story.RunningOrderId);
+        const storyID = mosTypes.mosString128.stringify(story.ID);
+        logger.info(`[RundownStore] Full story received: "${roID}"/"${storyID}", body: ${story.Body.length} items`);
+        this.emit('storyChanged', roID, 'fullStory');
     }
 
-    /** roStory：接收完整 story 内容推送 */
-    handleRunningOrderStory(story: IMOSROFullStory): void {
-        const roID = mosTypes.mosString128.stringify(story.RunningOrderId);
-        const storyID = mosTypes.mosString128.stringify(story.ID);
-        logger.info(`[RundownStore] Received full story: ${roID}/${storyID}, body items: ${story.Body.length}`);
-        // Profile 4 的 roStory 是增量推送完整 story 内容
-        // 此处记录日志，业务层可按需扩展
-        this.emit('storyChanged', roID, 'fullStory');
+    // ── 私有工具方法 ──────────────────────────────────────────────────────────
+
+    /**
+     * 查找"插入到此元素之前"的索引。
+     * MOS 协议语义：element_target 指定的是目标位置的元素，插入在其前面。
+     * 如果找不到目标元素，追加到末尾并记录警告。
+     */
+    private _findInsertBeforeIdx<T>(
+        arr: T[],
+        getID: (item: T) => string,
+        insertBeforeID: string,
+        contextID: string,
+        op: string
+    ): number {
+        if (!insertBeforeID) return arr.length;
+        const idx = arr.findIndex(item => getID(item) === insertBeforeID);
+        if (idx === -1) {
+            logger.warn(`[RundownStore] ${op}: target "${insertBeforeID}" not found in "${contextID}", appending to end.`);
+            return arr.length;
+        }
+        return idx; // 插入到目标之前，即目标的当前位置
+    }
+
+    private _getRundownOrWarn(roID: string, op: string): IMOSRunningOrder | undefined {
+        const ro = this._rundowns.get(roID);
+        if (!ro) logger.warn(`[RundownStore] ${op}: RO "${roID}" not found.`);
+        return ro;
+    }
+
+    private _getStoryOrWarn(roID: string, storyID: string, op: string): IMOSROStory | undefined {
+        const ro = this._rundowns.get(roID);
+        if (!ro) { logger.warn(`[RundownStore] ${op}: RO "${roID}" not found.`); return undefined; }
+        const story = ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === storyID);
+        if (!story) logger.warn(`[RundownStore] ${op}: story "${storyID}" not found in RO "${roID}".`);
+        return story;
     }
 }
 
-// ─── 单例导出 ─────────────────────────────────────────────────────────────────
+// ─── 全局单例 ─────────────────────────────────────────────────────────────────
 
-/** 全局单例，整个应用共享同一个 RundownStore */
 export const rundownStore = new RundownStore();

@@ -2,21 +2,25 @@
  * @fileoverview 结构化日志模块（基于 winston）
  *
  * 功能：
- * - 控制台输出（开发环境带颜色，生产环境 JSON 格式）
- * - 文件输出（按日期滚动，自动清理旧日志）
- * - 日志级别由环境变量控制
+ * - 控制台：开发环境带颜色和时间戳，生产环境 JSON 格式
+ * - 文件：按大小滚动，自动保留最近 N 个文件
+ *   - rcas.log          所有 info 及以上日志（10MB × 7 个）
+ *   - rcas.error.log    仅 error 日志（5MB × 14 个）
+ *   - rcas.exceptions.log  未捕获异常
+ *   - rcas.rejections.log  未处理的 Promise 拒绝
+ * - 日志级别由环境变量 LOG_LEVEL 控制（默认 info）
  *
- * 使用方式：
- *   import { logger } from './Logger';
+ * 使用：
+ *   import { logger } from './logger';
  *   logger.info('消息');
- *   logger.error('错误', err);
+ *   logger.error('错误', { error: err.message, stack: err.stack });
  *   logger.warn('警告');
  *   logger.debug('调试信息');  // 只在 LOG_LEVEL=debug 时输出
  */
 
 import winston from 'winston';
-import path from 'path';
-import fs from 'fs';
+import path    from 'path';
+import fs      from 'fs';
 
 // ─── 日志目录 ─────────────────────────────────────────────────────────────────
 
@@ -25,14 +29,13 @@ if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
-// ─── 日志级别 ─────────────────────────────────────────────────────────────────
+// ─── 配置 ─────────────────────────────────────────────────────────────────────
 
-const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const LOG_LEVEL     = process.env.LOG_LEVEL   || 'info';
+const IS_PRODUCTION = process.env.NODE_ENV    === 'production';
 
-// ─── 格式定义 ─────────────────────────────────────────────────────────────────
+// ─── 格式 ─────────────────────────────────────────────────────────────────────
 
-/** 控制台格式：开发环境带颜色和对齐，生产环境 JSON */
 const consoleFormat = IS_PRODUCTION
     ? winston.format.combine(
         winston.format.timestamp(),
@@ -43,65 +46,57 @@ const consoleFormat = IS_PRODUCTION
         winston.format.timestamp({ format: 'HH:mm:ss.SSS' }),
         winston.format.printf(({ timestamp, level, message, ...meta }) => {
             const metaStr = Object.keys(meta).length
-                ? ' ' + JSON.stringify(meta)
+                ? ' ' + JSON.stringify(meta, null, 0)
                 : '';
             return `${timestamp} ${level}: ${message}${metaStr}`;
         })
     );
 
-/** 文件格式：始终使用 JSON，便于日志分析工具处理 */
 const fileFormat = winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.json()
 );
 
-// ─── 创建 Logger ──────────────────────────────────────────────────────────────
+// ─── Logger 实例 ──────────────────────────────────────────────────────────────
 
 export const logger = winston.createLogger({
     level: LOG_LEVEL,
     transports: [
-        // 控制台
-        new winston.transports.Console({
-            format: consoleFormat,
-        }),
+        new winston.transports.Console({ format: consoleFormat }),
 
-        // 综合日志文件（info 及以上）
         new winston.transports.File({
             filename: path.join(LOG_DIR, 'rcas.log'),
-            format: fileFormat,
-            level: 'info',
-            maxsize: 10 * 1024 * 1024,  // 10MB 滚动
-            maxFiles: 7,                 // 保留 7 个文件（约 70MB）
+            format:   fileFormat,
+            level:    'info',
+            maxsize:  10 * 1024 * 1024, // 10MB
+            maxFiles: 7,
             tailable: true,
         }),
 
-        // 错误日志单独文件（便于快速排查）
         new winston.transports.File({
             filename: path.join(LOG_DIR, 'rcas.error.log'),
-            format: fileFormat,
-            level: 'error',
-            maxsize: 5 * 1024 * 1024,
+            format:   fileFormat,
+            level:    'error',
+            maxsize:  5 * 1024 * 1024,  // 5MB
             maxFiles: 14,
             tailable: true,
         }),
     ],
 });
 
-// ─── 未捕获异常处理 ───────────────────────────────────────────────────────────
-
+// 未捕获异常和 Promise 拒绝写入专用文件
 logger.exceptions.handle(
     new winston.transports.File({
         filename: path.join(LOG_DIR, 'rcas.exceptions.log'),
-        format: fileFormat,
+        format:   fileFormat,
     })
 );
-
 logger.rejections.handle(
     new winston.transports.File({
         filename: path.join(LOG_DIR, 'rcas.rejections.log'),
-        format: fileFormat,
+        format:   fileFormat,
     })
 );
 
-logger.info(`[Logger] Initialized. Level: ${LOG_LEVEL}, Dir: ${LOG_DIR}`);
+logger.info(`[Logger] Ready. Level: "${LOG_LEVEL}", Dir: "${LOG_DIR}"`);
