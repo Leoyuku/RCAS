@@ -25,9 +25,9 @@ import http                           from 'http';
 import express, { Request, Response } from 'express';
 import cors                           from 'cors';
 import { MosConnector }               from './modules/1_mos_connection/mos-connection';
-import { rundownStore }               from './store/rundown-store';
-import { SocketServer }               from './store/socket-server';
-import { logger }                     from './store/logger';
+import { rundownStore }               from './modules/3_store/rundown-store';
+import { SocketServer }               from './modules/3_store/socket-server';
+import { logger }                     from './shared/logger';
 
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
 

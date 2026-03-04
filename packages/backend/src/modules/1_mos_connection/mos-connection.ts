@@ -35,8 +35,8 @@ import {
     IMOSObjectList,
     IMOSListSearchableSchema,
 } from './internals/model';
-import { rundownStore } from '../../store/rundown-store';
-import { logger } from '../../store/logger';
+import { rundownStore } from '../3_store/rundown-store';
+import { logger } from '../../shared/logger';
 
 const mosTypes = getMosTypes(true);
 

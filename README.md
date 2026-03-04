@@ -179,7 +179,7 @@ packages/backend/
     └── 1_mos_connection/
     │   ├── index.ts              # - [公共接口] 只导出 MosConnection 类
     │   │
-    │   ├── mos-connection-ts     # - [最顶层] “总指挥”，管理两个“协议终端”
+    │   ├── mos-connection.ts     # - [最顶层] “总指挥”，管理两个“协议终端”
     │   │
     │   └── internals/            # - [内部实现细节]
     │       │
@@ -218,7 +218,7 @@ packages/backend/
 
 packages/core-lib/src/models/
 │
-├── mos-model-ts          # 【职责单一】只定义从 Gateway 传来的、标准化的 MOS Rundown 对象接口
+├── mos-model.ts          # 【职责单一】只定义从 Gateway 传来的、标准化的 MOS Rundown 对象接口
 │
 ├── rundown-model.ts      # 【职责单一】只定义最顶层的 Rundown 对象的接口 (IRundown)
 │

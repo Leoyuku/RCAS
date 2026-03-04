@@ -21,9 +21,9 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { rundownStore } from './rundown-store';
-import { logger } from './logger';
-import { IMOSRunningOrder } from '../modules/1_mos_connection/internals/model';
-import { IMOSObjectAirStatus } from '../modules/1_mos_connection/internals/model';
+import { logger } from '../../shared/logger';
+import { IMOSRunningOrder } from '../1_mos_connection/internals/model';
+import { IMOSObjectAirStatus } from '../1_mos_connection/internals/model';
 
 // ─── 类型定义（前端可复用） ───────────────────────────────────────────────────
 
