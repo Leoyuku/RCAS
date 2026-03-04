@@ -1733,7 +1733,7 @@ export class MosDevice implements IMOSDevice {
 		}
 		/** Require another profile to have been set  */
 		const requireProfile = (profile: number, requiredProfile: number) => {
-			if (!((this as any).config as any).supportedProfiles['profile' + requiredProfile]) {
+			if (!(this as any).supportedProfiles['profile' + requiredProfile]) {
 				throw fixError(
 					`Error: This MOS-device is configured to support Profile ${profile}, therefore it must also support Profile ${requiredProfile}!`
 				)
