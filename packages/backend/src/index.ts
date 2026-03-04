@@ -1,27 +1,32 @@
 /**
  * @fileoverview RCAS Backend 入口
  *
- * 启动顺序（顺序不可调换）：
+ * 启动顺序：
  *   1. 加载环境变量（dotenv，必须最先执行）
  *   2. 初始化日志系统
  *   3. 初始化 MosConnector（含磁盘数据恢复 + MOS 端口监听）
- *   4. 启动 Express HTTP 服务器
- *   5. 注册进程信号处理（优雅关闭）
+ *   4. 创建 HTTP server
+ *   5. 挂载 socket.io（必须在 HTTP server 创建之后）
+ *   6. 启动 HTTP server 监听
+ *   7. 注册进程信号处理（优雅关闭）
  *
- * 优雅关闭顺序（SIGTERM / SIGINT）：
+ * 优雅关闭顺序：
  *   1. 停止接受新 HTTP 请求
- *   2. 关闭 MOS 连接（让 NCS 知道是主动断开，而非崩溃）
- *   3. 等待所有待写入的持久化操作完成（防抖定时器）
- *   4. 退出进程
+ *   2. 关闭所有 socket.io 连接
+ *   3. 关闭 MOS 连接
+ *   4. 等待持久化防抖写入完成
+ *   5. 退出进程
  */
 
 // ── 必须第一行：加载 .env 文件 ────────────────────────────────────────────────
 import 'dotenv/config';
 
+import http                           from 'http';
 import express, { Request, Response } from 'express';
 import cors                           from 'cors';
 import { MosConnector }               from './modules/1_mos_connection/mos-connection';
 import { rundownStore }               from './store/rundown-store';
+import { SocketServer }               from './store/socket-server';
 import { logger }                     from './store/logger';
 
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
@@ -33,7 +38,6 @@ import { logger }                     from './store/logger';
 
     // ── 1. 初始化 MOS 连接（含数据恢复） ──────────────────────────────────────
     const mosConnector = new MosConnector();
-
     try {
         await mosConnector.init();
     } catch (err) {
@@ -50,7 +54,7 @@ import { logger }                     from './store/logger';
 
     // ── REST API ───────────────────────────────────────────────────────────────
 
-    /** 健康检查：运维监控、负载均衡器、EXE 托盘状态显示 */
+    /** 健康检查 */
     app.get('/health', (_req: Request, res: Response) => {
         const devices = mosConnector.getConnectedDevices();
         res.json({
@@ -60,21 +64,21 @@ import { logger }                     from './store/logger';
             connectedDevices: devices,
             rundownCount:     rundownStore.count,
             rundownIDs:       rundownStore.getAllIDs(),
+            socketClients:    socketServer.clientCount,
             version:          process.env.npm_package_version || '1.0.0',
             nodeEnv:          process.env.NODE_ENV || 'development',
         });
     });
 
-    /** 获取所有节目单（列表，不含完整 Story 内容） */
+    /** 获取所有节目单摘要 */
     app.get('/rundowns', (_req: Request, res: Response) => {
         const all = rundownStore.getAllRundowns();
         res.json({
             count:    all.length,
             rundowns: all.map(ro => ({
-                // 只返回摘要，避免大量数据传输
-                roID:        ro.ID,
-                roSlug:      ro.Slug,
-                storyCount:  ro.Stories.length,
+                roID:       ro.ID,
+                roSlug:     ro.Slug,
+                storyCount: ro.Stories.length,
             })),
         });
     });
@@ -82,24 +86,36 @@ import { logger }                     from './store/logger';
     /** 获取单个节目单完整数据 */
     app.get('/rundowns/:roID', (req: Request, res: Response) => {
         const roID = req.params['roID'] as string;
-        const ro = rundownStore.getRundown(roID);
+        const ro   = rundownStore.getRundown(roID);
         if (!ro) {
-            res.status(404).json({ error: `RO not found: ${req.params.roID}` });
+            res.status(404).json({ error: `RO not found: ${roID}` });
             return;
         }
         res.json(ro);
     });
 
-    // ── 3. 启动 HTTP 服务器 ────────────────────────────────────────────────────
-    const server = app.listen(port, () => {
-        logger.info('╔══════════════════════════════════════╗');
-        logger.info('║         RCAS Backend Ready           ║');
-        logger.info(`║  MOS : 10540 / 10541 / 10542         ║`);
-        logger.info(`║  HTTP: http://localhost:${port}         ║`);
-        logger.info('╚══════════════════════════════════════╝');
+    // ── 3. 创建 HTTP server ────────────────────────────────────────────────────
+    // 必须用 http.createServer(app) 而不是 app.listen()
+    // socket.io 需要接管这个 server 才能共享同一个端口
+    const httpServer = http.createServer(app);
+
+    // ── 4. 挂载 socket.io ─────────────────────────────────────────────────────
+    // socketServer 在此声明，供 /health 接口引用 clientCount
+    const socketServer = new SocketServer(httpServer);
+
+    // ── 5. 启动监听 ───────────────────────────────────────────────────────────
+    await new Promise<void>((resolve) => {
+        httpServer.listen(port, () => resolve());
     });
 
-    // ── 4. 优雅关闭 ───────────────────────────────────────────────────────────
+    logger.info('╔══════════════════════════════════════╗');
+    logger.info('║         RCAS Backend Ready           ║');
+    logger.info(`║  MOS  : 10540 / 10541 / 10542        ║`);
+    logger.info(`║  HTTP : http://localhost:${port}         ║`);
+    logger.info(`║  WS   : ws://localhost:${port}           ║`);
+    logger.info('╚══════════════════════════════════════╝');
+
+    // ── 6. 优雅关闭 ───────────────────────────────────────────────────────────
 
     let isShuttingDown = false;
 
@@ -113,36 +129,35 @@ import { logger }                     from './store/logger';
 
         // 步骤1：停止接受新 HTTP 请求
         await new Promise<void>((resolve) => {
-            server.close(() => {
+            httpServer.close(() => {
                 logger.info('[Shutdown] HTTP server closed.');
                 resolve();
             });
         });
 
-        // 步骤2：关闭 MOS 连接
-        // 主动断开让 NCS 知道是计划内关闭，避免 NCS 触发告警
+        // 步骤2：关闭所有 socket.io 连接（前端会触发自动重连）
+        await socketServer.dispose();
+
+        // 步骤3：关闭 MOS 连接（主动断开，NCS 知道是计划内关闭）
         try {
             await mosConnector.dispose();
         } catch (err) {
             logger.error('[Shutdown] Error closing MOS connections:', err);
         }
 
-        // 步骤3：等待持久化防抖定时器全部触发完成
-        // WRITE_DEBOUNCE_MS = 500ms，等待 600ms 确保所有数据都写入磁盘
-        logger.info('[Shutdown] Waiting for pending writes to complete...');
+        // 步骤4：等待持久化防抖定时器全部触发（600ms > 防抖的 500ms）
+        logger.info('[Shutdown] Waiting for pending disk writes...');
         await new Promise(resolve => setTimeout(resolve, 600));
 
         logger.info('[Shutdown] Graceful shutdown complete. Bye.');
         process.exit(0);
     };
 
-    // 标准 Unix 进程信号
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); // Docker stop / systemd stop
-    process.on('SIGINT',  () => gracefulShutdown('SIGINT'));  // Ctrl+C / Windows 关闭
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
-    // 未捕获异常：记录完整信息后退出，让 pm2/supervisor 重启
     process.on('uncaughtException', (err: Error) => {
-        logger.error('[FATAL] Uncaught Exception — process will exit:', {
+        logger.error('[FATAL] Uncaught Exception:', {
             message: err.message,
             stack:   err.stack,
         });
@@ -150,8 +165,8 @@ import { logger }                     from './store/logger';
     });
 
     process.on('unhandledRejection', (reason: unknown) => {
-        logger.error('[FATAL] Unhandled Promise Rejection — process will exit:', {
-            reason: String(reason),
+        logger.error('[FATAL] Unhandled Promise Rejection:', {
+            reason: reason instanceof Error ? reason.message : String(reason),
         });
         process.exit(1);
     });
