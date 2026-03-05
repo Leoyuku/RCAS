@@ -24,10 +24,10 @@ import {
     IMOSROAction,
     IMOSROFullStory,
     IMOSObjectAirStatus,
-} from '../1_mos_connection/internals/model';
-import { getMosTypes } from '../1_mos_connection/internals/mosTypes';
+} from '../../1_mos_connection/internals/model';
+import { getMosTypes } from '../../1_mos_connection/internals/mosTypes';
 import { persistRO, deletePersistedRO, loadAllPersistedROs } from './json-persistence';
-import { logger } from '../../shared/logger';
+import { logger } from '../../../shared/logger';
 
 const mosTypes = getMosTypes(false);
 

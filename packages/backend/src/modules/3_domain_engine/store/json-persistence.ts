@@ -26,9 +26,9 @@
 
 import * as fs   from 'fs';
 import * as path from 'path';
-import { IMOSRunningOrder } from '../1_mos_connection/internals/model';
-import { getMosTypes }      from '../1_mos_connection/internals/mosTypes';
-import { logger }           from '../../shared/logger';
+import { IMOSRunningOrder } from '../../1_mos_connection/internals/model';
+import { getMosTypes }      from '../../1_mos_connection/internals/mosTypes';
+import { logger }           from '../../../shared/logger';
 
 const mosTypes = getMosTypes(false);
 

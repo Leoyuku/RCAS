@@ -35,7 +35,7 @@ import {
     IMOSObjectList,
     IMOSListSearchableSchema,
 } from './internals/model';
-import { rundownStore } from '../3_store/rundown-store';
+import { rundownStore } from '../3_domain_engine/store/rundown-store';
 import { logger } from '../../shared/logger';
 import { config } from '../../shared/config';
 

@@ -24,29 +24,36 @@ RCAS/
 ---
 
 ## 二、后端当前目录结构
-
 ```
 packages/backend/src/
-├── index.ts                          ← 启动入口
+├── index.ts                                    ← 启动入口
 ├── shared/
-│   ├── logger.ts                     ✅ 完成
-│   ├── config.ts                     ✅ 完成
-│   └── startup-check.ts              ✅ 完成（端口/目录/磁盘检查）
+│   ├── logger.ts                               ✅ 完成
+│   ├── config.ts                               ✅ 完成
+│   └── startup-check.ts                        ✅ 完成
 ├── modules/
-│   ├── 1_mos_connection/             ✅ 完成（整体移植自 Sofie）
-│   │   ├── mos-connection.ts         ← MosConnector 类，注册所有回调
-│   │   └── connector/                ← Sofie MOS 协议实现（勿动）
-│   ├── 2_ingest/                     ⬅️ 【下一步工作目标】（目录存在，内容为空）
-│   ├── 3_store/                      ✅ 完成
-│   │   ├── rundown-store.ts          ← 核心状态管理，存储 IMOSRunningOrder
-│   │   ├── json-persistence.ts       ← 持久化到 data/rundowns/*.json
-│   │   ├── socket-server.ts          ← Socket.io 实时推送
-│   │   └── logger.ts                 ← Winston 日志
-│   ├── 4_domain_engine/              ❌ 尚未开始
-│   └── 5_playout_controllers/        ❌ 尚未开始
+│   ├── 1_mos_connection/                       ✅ 完成（整体移植自 Sofie）
+│   │   ├── mos-connection.ts                   ← MosConnector 类，注册所有回调
+│   │   └── connector/                          ← Sofie MOS 协议实现（勿动）
+│   │
+│   ├── 2_ingest/                               ⬅️ 【下一步工作目标】
+│   │   └── (待实现)
+│   │
+│   ├── 3_domain_engine/                        🔲 部分框架已存在
+│   │   ├── store/                              ✅ 完成（原 3_store 迁移至此）
+│   │   │   ├── rundown-store.ts                ← MOS 状态管理（IMOSRunningOrder）
+│   │   │   ├── json-persistence.ts             ← 持久化
+│   │   │   └── socket-server.ts                ← Socket.io 实时推送
+│   │   ├── blueprints/                         🔲 待实现
+│   │   ├── engine/                             🔲 待实现
+│   │   └── models/                             🔲 待实现
+│   │
+│   └── 4_playout_controllers/                  ❌ 尚未开始
 ```
 
-**目录说明：** 早期曾有独立的 `store/` 目录，后来发现与总体架构思路有重合，已将所有文件迁移至 `modules/3_store/` 并删除了原 `store/` 目录，现目录结构与架构设计完全对齐。
+**编号说明：** 编号代表数据流层级，不是开发顺序。
+`1`=协议接入，`2`=数据转换，`3`=核心引擎，`4`=播出控制。
+编号连续，无空缺。
 
 ---
 
@@ -58,83 +65,87 @@ packages/backend/src/
 | 第二轮 | 数据持久化（RundownStore + JSON）、Socket.io 实时推送、Winston 日志、优雅关闭 | ✅ |
 | 第三轮 | 目录架构对齐、启动自检（startup-check）、NCS 白名单配置 | ✅ |
 | 验证轮 | Profile 2 全部 9 个操作端到端验证（quick-mos → 后端 → 持久化）| ✅ |
+| 第四轮 | 架构重构：目录重命名对齐 Sofie 设计思想，3_store 并入 3_domain_engine/store | ✅ |
 
-**Profile 2 验证结论：9/9 全部通过。**
-顺带修复了 quick-mos 的一个 bug：`refreshFiles()` 里 `Object.entries` 解构变量名对调，导致 `onDeletedRunningOrder` 传入的是 timestamp 而非 RO ID。
+**Profile 2 验证结论：9/9 全部通过（重构后验证无回归）。**
+
+**quick-mos bug 记录：** `refreshFiles()` 里 `Object.entries` 解构变量名对调，
+导致 `onDeletedRunningOrder` 传入的是 timestamp 而非 RO ID。
 修复位置：`packages/quick-mos/src/index.ts` 的 `refreshFiles()` 函数。
 
 ---
 
 ## 四、当前数据流
-
 ```
 NCS (quick-mos)
-    │
     │  MOS 协议（TCP 10540/10541/10542）
     ▼
 1_mos_connection（MosConnector）
     │  IMOSRunningOrder 对象
     ▼
-RundownStore（内存 Map）
-    │  同步写入
+3_domain_engine/store/RundownStore（内存 Map）
+    │
     ├──▶ json-persistence → data/rundowns/*.json（持久化）
     └──▶ socket-server → Socket.io → 前端（实时推送）
 ```
 
-**RundownStore 存储的是原始 `IMOSRunningOrder`（MOS 协议对象），尚未转换为内部 `IRundown`。**
+**注意：RundownStore 目前存储的是原始 `IMOSRunningOrder`（MOS 协议对象）。
+`2_ingest` 实现后，将转换为内部 `IRundown`，RundownStore 最终只存业务对象。**
 
 ---
 
-## 五、下一步：第四轮 —— `2_ingest` 数据转换层
+## 五、下一步：第五轮 —— `2_ingest` 数据转换层
 
 ### 目标
 将 `IMOSRunningOrder`（MOS 协议原始对象）转换为 RCAS 内部的 `IRundown`（业务域对象）。
 
-### 为什么需要这一层
-- `IMOSRunningOrder` 是 MOS 协议的产物，含有大量协议细节（`IMOSString128` 类型、MOS XML 语义等）
-- `IRundown` 是 RCAS 的业务语言（`Segment` / `Part` / `Piece` 结构），与具体协议无关
-- 这一转换层（Blueprint）是系统可扩展性的关键：未来换协议只需换 ingest 层
+### 架构决策（已定论）
+1. **映射关系**：MOS Story → ISegment，MOS Item → IPart（暂不生成 IPiece）
+2. **触发方式**：监听 `RundownStore` 事件（`roCreated`/`roReplaced` 等），事件驱动解耦
+3. **存储位置**：转换结果存入 `3_domain_engine/store/` 内新建的 `ingest-store.ts`
+4. **转换函数**：`2_ingest/mos-to-rundown.ts`，纯函数，无状态，无副作用
 
-### core-lib 中已定义的目标类型
-```
-packages/core-lib/src/models/
-├── rundown-model.ts   → IRundown（含 segments、status、currentPartId 等）
-├── segment-model.ts   → ISegment
-├── part-model.ts      → IPart
-├── piece-model.ts     → IPiece
-└── enums.ts           → PlaylistStatus 等枚举
-```
-
-### 转换映射关系（初步设想）
+### 转换映射关系
 ```
 IMOSRunningOrder          →  IRundown
   .ID (IMOSString128)     →    .externalId (string)
   .Slug                   →    .name
   .EditorialStart         →    .expectedStart
   .EditorialDuration      →    .expectedDuration
-  .Stories[]              →    .segments[]（每个 Story → Segment）
-    Story.Items[]         →      Segment 下的 Parts/Pieces（待设计）
+  .Stories[]              →    .segments[]
+    Story.ID              →      ISegment.externalId
+    Story.Slug            →      ISegment.name
+    Story.Items[]         →      ISegment 下的 parts[]
+      Item.ID             →        IPart.externalId
+      Item.Slug           →        IPart.title
 ```
 
-### 开始前需要讨论的问题
-1. **MOS Story → Segment 还是 Part？** 广播行业惯例是 Story = Segment，Story 里的 Item = Part/Piece，但需根据实际业务确认。
-2. **`2_ingest` 的触发方式**：监听 `RundownStore` 的事件（`roCreated`/`roReplaced` 等），还是直接在 `MosConnector` 回调里转换？
-3. **转换后的 `IRundown` 存在哪里**：新建 `IngestStore`，还是扩展现有 `RundownStore`？
+### 计划文件结构
+```
+2_ingest/
+└── mos-to-rundown.ts     ← 纯函数转换（IMOSRunningOrder → IRundown）
+
+3_domain_engine/store/
+├── rundown-store.ts      ← 现有，存 IMOSRunningOrder，emit 事件
+├── ingest-store.ts       ← 【新建】存 IRundown，业务真相来源
+├── json-persistence.ts   ← 现有
+└── socket-server.ts      ← 现有（后续改为订阅 ingest-store）
+```
 
 ---
 
 ## 六、关键架构决策（已定论，勿推翻）
 
-1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos扮演 NCS的角色
-2. **连接模式**：后端监听 10540/10541/10542，在lower port上作为客户端，主动连接NCS的loweerport; 在upper port上作为服务器，等待NCS连接到upper port
+1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos 扮演 NCS 的角色
+2. **连接模式**：后端监听 10540/10541/10542；lower port 主动连接 NCS；upper port 等待 NCS 连接
 3. **持久化格式**：`data/rundowns/_index.json`（索引）+ `data/rundowns/{roID}.json`（完整数据）
 4. **Profile 支持**：Profile 0 + 2 + 4，拒绝 1/3/5/6/7
 5. **部署形态**：当前 Monolith（单进程），预留 Microservice 扩展点
+6. **设计哲学**：参考 Sofie Core，声明式状态驱动，Blueprint 可热插拔
 
 ---
 
 ## 七、开发环境
-
 ```bash
 # 启动后端
 cd ~/rcas/packages/backend
@@ -163,5 +174,5 @@ npm run start
 3. 如需了解架构全貌，读项目知识库中的 `ARCHITECTURE.md` 和 `README.md`
 4. 如需了解当前代码，重点看：
    - `packages/backend/src/modules/1_mos_connection/mos-connection.ts`（回调注册）
-   - `packages/backend/src/3_store/rundown-store.ts`（状态管理）
+   - `packages/backend/src/modules/3_domain_engine/store/rundown-store.ts`（状态管理）
    - `packages/core-lib/src/models/`（目标数据类型）
