@@ -3,44 +3,35 @@
  *
  * 职责：
  * - 接管 HTTP server，初始化 socket.io
- * - 监听 RundownStore 的所有事件，实时推送给已连接的前端客户端
+ * - 监听 RundownStore 的业务事件，实时推送给已连接的前端客户端
  * - 前端连接时立即推送全量快照（防止页面空白）
  * - 连接/断开事件记录日志
  *
  * 推送事件清单（前端监听）：
- *   snapshot              连接成功后的全量快照 { rundowns: IMOSRunningOrder[] }
- *   ro:created            RO 创建  { roID, ro }
- *   ro:replaced           RO 替换  { roID, ro }
- *   ro:deleted            RO 删除  { roID }
- *   ro:metadata-updated   元数据更新 { roID }
- *   ro:status-changed     播出状态  { roID, status }
- *   ro:ready-to-air       上播状态  { roID, airStatus }
- *   ro:story-changed      Story 变更 { roID, changeType, ro }
+ *   snapshot              连接成功后的全量快照 { rundowns: IRundown[] }
+ *   rundown:created       Rundown 创建  { id, rundown }
+ *   rundown:updated       Rundown 更新  { id, rundown }
+ *   rundown:deleted       Rundown 删除  { id }
  */
 
-import { Server as HttpServer } from 'http';
-import { Server as SocketIOServer, Socket } from 'socket.io';
-import { rundownStore } from './rundown-store';
-import { logger } from '../../../shared/logger';
-import { IMOSRunningOrder } from '../../1_mos_connection/internals/model';
-import { IMOSObjectAirStatus } from '../../1_mos_connection/internals/model';
+import { Server as HttpServer }               from 'http';
+import { Server as SocketIOServer, Socket }   from 'socket.io';
+import { rundownStore }                        from './rundown-store';
+import { logger }                              from '../../../shared/logger';
+import { IRundown }                            from '../../../../../core-lib/src/models/rundown-model';
 
 // ─── 类型定义（前端可复用） ───────────────────────────────────────────────────
 
 export interface ServerToClientEvents {
-    snapshot:             (payload: { rundowns: IMOSRunningOrder[] }) => void;
-    'ro:created':         (payload: { roID: string; ro: IMOSRunningOrder }) => void;
-    'ro:replaced':        (payload: { roID: string; ro: IMOSRunningOrder }) => void;
-    'ro:deleted':         (payload: { roID: string }) => void;
-    'ro:metadata-updated':(payload: { roID: string }) => void;
-    'ro:status-changed':  (payload: { roID: string; status: string }) => void;
-    'ro:ready-to-air':    (payload: { roID: string; airStatus: IMOSObjectAirStatus }) => void;
-    'ro:story-changed':   (payload: { roID: string; changeType: string; ro: IMOSRunningOrder | undefined }) => void;
+    snapshot:            (payload: { rundowns: IRundown[] }) => void;
+    'rundown:created':   (payload: { id: string; rundown: IRundown }) => void;
+    'rundown:updated':   (payload: { id: string; rundown: IRundown }) => void;
+    'rundown:deleted':   (payload: { id: string }) => void;
 }
 
 export interface ClientToServerEvents {
     // 前端目前只监听，不需要向服务端发送事件
-    // 预留接口，后续可扩展（如前端请求特定 RO）
+    // 预留接口，后续可扩展（如前端请求特定 Rundown）
 }
 
 // ─── SocketServer 类 ──────────────────────────────────────────────────────────
@@ -75,10 +66,9 @@ export class SocketServer {
             logger.info(`[SocketServer] Client connected: ${clientID} (${clientIP}), total: ${this._io.engine.clientsCount}`);
 
             // 连接后立即推送全量快照
-            // 前端不会出现"连上了但数据为空"的情况
             const snapshot = rundownStore.getAllRundowns();
             socket.emit('snapshot', { rundowns: snapshot });
-            logger.debug(`[SocketServer] Sent snapshot to ${clientID}: ${snapshot.length} RO(s)`);
+            logger.debug(`[SocketServer] Sent snapshot to ${clientID}: ${snapshot.length} rundown(s)`);
 
             socket.on('disconnect', (reason) => {
                 logger.info(`[SocketServer] Client disconnected: ${clientID}, reason: ${reason}, remaining: ${this._io.engine.clientsCount}`);
@@ -96,59 +86,31 @@ export class SocketServer {
 
     private _subscribeToStore(): void {
 
-        rundownStore.on('roCreated', (roID, ro) => {
-            logger.debug(`[SocketServer] Broadcasting ro:created → ${roID}`);
-            this._io.emit('ro:created', { roID, ro });
+        rundownStore.on('rundownCreated', (id, rundown) => {
+            logger.debug(`[SocketServer] Broadcasting rundown:created → ${id}`);
+            this._io.emit('rundown:created', { id, rundown });
         });
 
-        rundownStore.on('roReplaced', (roID, ro) => {
-            logger.debug(`[SocketServer] Broadcasting ro:replaced → ${roID}`);
-            this._io.emit('ro:replaced', { roID, ro });
+        rundownStore.on('rundownUpdated', (id, rundown) => {
+            logger.debug(`[SocketServer] Broadcasting rundown:updated → ${id}`);
+            this._io.emit('rundown:updated', { id, rundown });
         });
 
-        rundownStore.on('roDeleted', (roID) => {
-            logger.debug(`[SocketServer] Broadcasting ro:deleted → ${roID}`);
-            this._io.emit('ro:deleted', { roID });
-        });
-
-        rundownStore.on('roMetadataUpdated', (roID) => {
-            logger.debug(`[SocketServer] Broadcasting ro:metadata-updated → ${roID}`);
-            this._io.emit('ro:metadata-updated', { roID });
-        });
-
-        rundownStore.on('roStatusChanged', (roID, status) => {
-            logger.debug(`[SocketServer] Broadcasting ro:status-changed → ${roID} ${status}`);
-            this._io.emit('ro:status-changed', { roID, status });
-        });
-
-        rundownStore.on('roReadyToAirChanged', (roID, airStatus) => {
-            logger.debug(`[SocketServer] Broadcasting ro:ready-to-air → ${roID} ${airStatus}`);
-            this._io.emit('ro:ready-to-air', { roID, airStatus });
-        });
-
-        // story 级别变更：同时推送更新后的完整 RO
-        // 前端不需要自己再拼装，直接替换本地状态即可
-        rundownStore.on('storyChanged', (roID, changeType) => {
-            const ro = rundownStore.getRundown(roID);
-            logger.debug(`[SocketServer] Broadcasting ro:story-changed → ${roID} (${changeType})`);
-            this._io.emit('ro:story-changed', { roID, changeType, ro });
+        rundownStore.on('rundownDeleted', (id) => {
+            logger.debug(`[SocketServer] Broadcasting rundown:deleted → ${id}`);
+            this._io.emit('rundown:deleted', { id });
         });
     }
 
-    // ── 对外接口 ──────────────────────────────────────────────────────────────
+    // ── 工具方法 ──────────────────────────────────────────────────────────────
 
-    /** 获取当前连接的客户端数量 */
     get clientCount(): number {
         return this._io.engine.clientsCount;
     }
 
-    /** 优雅关闭 */
-    async dispose(): Promise<void> {
+    async close(): Promise<void> {
         return new Promise((resolve) => {
-            this._io.close(() => {
-                logger.info('[SocketServer] Closed.');
-                resolve();
-            });
+            this._io.close(() => resolve());
         });
     }
 }

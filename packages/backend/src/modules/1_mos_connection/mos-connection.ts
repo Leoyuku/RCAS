@@ -35,7 +35,7 @@ import {
     IMOSObjectList,
     IMOSListSearchableSchema,
 } from './internals/model';
-import { rundownStore } from '../3_domain_engine/store/rundown-store';
+import { mosCache } from '../3_domain_engine/store/mos-cache';
 import { logger } from '../../shared/logger';
 import { config } from '../../shared/config';
 
@@ -173,7 +173,7 @@ export class MosConnector {
     // ── 初始化 ────────────────────────────────────────────────────────────────
 
     async init(): Promise<void> {
-        await rundownStore.restore();
+        // restore 由 rundownStore 统一负责，此处无需调用
         await this.mosConnection.init();
 
         logger.info(`[MosConnector] Listening on MOS ports ${config.mosPortLower}/${config.mosPortUpper}/${config.mosPortQuery}`);
@@ -193,7 +193,7 @@ export class MosConnector {
             });
         }
 
-        logger.info(`[MosConnector] Ready. ${rundownStore.count} RO(s) loaded from disk.`);
+        logger.info(`[MosConnector] Ready. ${mosCache.count} RO(s) loaded from disk.`);
     }
 
     // ── 优雅关闭 ──────────────────────────────────────────────────────────────
@@ -274,63 +274,63 @@ export class MosConnector {
 
         mosDevice.onCreateRunningOrder(async (ro: IMOSRunningOrder) =>
             safeRoAck(deviceID, 'onCreateRunningOrder', ro.ID!, async () => {
-                rundownStore.handleCreateRunningOrder(ro);
+                mosCache.handleCreateRunningOrder(ro);
                 return makeRoAck(ro.ID!);
             })
         );
 
         mosDevice.onReplaceRunningOrder(async (ro: IMOSRunningOrder) =>
             safeRoAck(deviceID, 'onReplaceRunningOrder', ro.ID!, async () => {
-                rundownStore.handleReplaceRunningOrder(ro);
+                mosCache.handleReplaceRunningOrder(ro);
                 return makeRoAck(ro.ID!);
             })
         );
 
         mosDevice.onDeleteRunningOrder(async (roId: IMOSString128) =>
             safeRoAck(deviceID, 'onDeleteRunningOrder', roId, async () => {
-                rundownStore.handleDeleteRunningOrder(mosTypes.mosString128.stringify(roId));
+                mosCache.handleDeleteRunningOrder(mosTypes.mosString128.stringify(roId));
                 return makeRoAck(roId);
             })
         );
 
         mosDevice.onRequestRunningOrder(async (roId: IMOSString128) => {
             const roIDStr = mosTypes.mosString128.stringify(roId);
-            const ro = rundownStore.getRundown(roIDStr);
+            const ro = mosCache.getRundown(roIDStr);
             logger.debug(`[P2][${deviceID}] reqRunningOrder: ${roIDStr} → ${ro ? 'found' : 'not found'}`);
             return ro ?? null;
         });
 
         mosDevice.onMetadataReplace(async (roBase: IMOSRunningOrderBase) =>
             safeRoAck(deviceID, 'onMetadataReplace', roBase.ID, async () => {
-                rundownStore.handleMetadataReplace(roBase);
+                mosCache.handleMetadataReplace(roBase);
                 return makeRoAck(roBase.ID);
             })
         );
 
         mosDevice.onRunningOrderStatus(async (status: IMOSRunningOrderStatus) =>
             safeRoAck(deviceID, 'onRunningOrderStatus', status.ID, async () => {
-                rundownStore.handleRunningOrderStatus(status);
+                mosCache.handleRunningOrderStatus(status);
                 return makeRoAck(status.ID);
             })
         );
 
         mosDevice.onStoryStatus(async (status: IMOSStoryStatus) =>
             safeRoAck(deviceID, 'onStoryStatus', status.RunningOrderId, async () => {
-                rundownStore.handleStoryStatus(status);
+                mosCache.handleStoryStatus(status);
                 return makeRoAck(status.RunningOrderId);
             })
         );
 
         mosDevice.onItemStatus(async (status: IMOSItemStatus) =>
             safeRoAck(deviceID, 'onItemStatus', status.RunningOrderId, async () => {
-                rundownStore.handleItemStatus(status);
+                mosCache.handleItemStatus(status);
                 return makeRoAck(status.RunningOrderId);
             })
         );
 
         mosDevice.onReadyToAir(async (data: IMOSROReadyToAir) =>
             safeRoAck(deviceID, 'onReadyToAir', data.ID, async () => {
-                rundownStore.handleReadyToAir(data);
+                mosCache.handleReadyToAir(data);
                 return makeRoAck(data.ID);
             })
         );
@@ -343,35 +343,35 @@ export class MosConnector {
 
         mosDevice.onROInsertStories(async (action: IMOSStoryAction, stories: IMOSROStory[]) =>
             safeRoAck(deviceID, 'onROInsertStories', action.RunningOrderID, async () => {
-                rundownStore.handleROInsertStories(action, stories);
+                mosCache.handleROInsertStories(action, stories);
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onROReplaceStories(async (action: IMOSStoryAction, stories: IMOSROStory[]) =>
             safeRoAck(deviceID, 'onROReplaceStories', action.RunningOrderID, async () => {
-                rundownStore.handleROReplaceStories(action, stories);
+                mosCache.handleROReplaceStories(action, stories);
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onROMoveStories(async (action: IMOSStoryAction, storyIDs: IMOSString128[]) =>
             safeRoAck(deviceID, 'onROMoveStories', action.RunningOrderID, async () => {
-                rundownStore.handleROMoveStories(action, storyIDs.map(id => mosTypes.mosString128.stringify(id)));
+                mosCache.handleROMoveStories(action, storyIDs.map(id => mosTypes.mosString128.stringify(id)));
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onRODeleteStories(async (action: IMOSROAction, storyIDs: IMOSString128[]) =>
             safeRoAck(deviceID, 'onRODeleteStories', action.RunningOrderID, async () => {
-                rundownStore.handleRODeleteStories(action, storyIDs.map(id => mosTypes.mosString128.stringify(id)));
+                mosCache.handleRODeleteStories(action, storyIDs.map(id => mosTypes.mosString128.stringify(id)));
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onROSwapStories(async (action: IMOSROAction, storyID0: IMOSString128, storyID1: IMOSString128) =>
             safeRoAck(deviceID, 'onROSwapStories', action.RunningOrderID, async () => {
-                rundownStore.handleROSwapStories(
+                mosCache.handleROSwapStories(
                     action,
                     mosTypes.mosString128.stringify(storyID0),
                     mosTypes.mosString128.stringify(storyID1)
@@ -388,14 +388,14 @@ export class MosConnector {
 
         mosDevice.onROInsertItems(async (action: IMOSItemAction, items: IMOSItem[]) =>
             safeRoAck(deviceID, 'onROInsertItems', action.RunningOrderID, async () => {
-                rundownStore.handleROInsertItems(action, items);
+                mosCache.handleROInsertItems(action, items);
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onROReplaceItems(async (action: IMOSItemAction, items: IMOSItem[]) =>
             safeRoAck(deviceID, 'onROReplaceItems', action.RunningOrderID, async () => {
-                rundownStore.handleROReplaceItems(action, items);
+                mosCache.handleROReplaceItems(action, items);
                 return makeRoAck(action.RunningOrderID);
             })
         );
@@ -406,21 +406,21 @@ export class MosConnector {
         mosDevice.onROMoveItems(async (action: any, itemIDs: IMOSString128[]) => {
             const typedAction = action as IMOSItemAction;
             return safeRoAck(deviceID, 'onROMoveItems', typedAction.RunningOrderID, async () => {
-                rundownStore.handleROMoveItems(typedAction, itemIDs.map(id => mosTypes.mosString128.stringify(id)));
+                mosCache.handleROMoveItems(typedAction, itemIDs.map(id => mosTypes.mosString128.stringify(id)));
                 return makeRoAck(typedAction.RunningOrderID);
             });
         });
 
         mosDevice.onRODeleteItems(async (action: IMOSStoryAction, itemIDs: IMOSString128[]) =>
             safeRoAck(deviceID, 'onRODeleteItems', action.RunningOrderID, async () => {
-                rundownStore.handleRODeleteItems(action, itemIDs.map(id => mosTypes.mosString128.stringify(id)));
+                mosCache.handleRODeleteItems(action, itemIDs.map(id => mosTypes.mosString128.stringify(id)));
                 return makeRoAck(action.RunningOrderID);
             })
         );
 
         mosDevice.onROSwapItems(async (action: IMOSStoryAction, itemID0: IMOSString128, itemID1: IMOSString128) =>
             safeRoAck(deviceID, 'onROSwapItems', action.RunningOrderID, async () => {
-                rundownStore.handleROSwapItems(
+                mosCache.handleROSwapItems(
                     action,
                     mosTypes.mosString128.stringify(itemID0),
                     mosTypes.mosString128.stringify(itemID1)
@@ -472,14 +472,14 @@ export class MosConnector {
         // ── Profile 4：全量节目单同步 ─────────────────────────────────────────
 
         mosDevice.onRequestAllRunningOrders(async (): Promise<IMOSRunningOrder[]> => {
-            const all = rundownStore.getAllRunningOrdersForNCS();
+            const all = mosCache.getAllRundowns();
             logger.info(`[P4][${deviceID}] reqAllRunningOrders → ${all.length} RO(s)`);
             return all;
         });
 
         mosDevice.onRunningOrderStory(async (story: IMOSROFullStory) =>
             safeRoAck(deviceID, 'onRunningOrderStory', story.RunningOrderId, async () => {
-                rundownStore.handleRunningOrderStory(story);
+                mosCache.handleRunningOrderStory(story);
                 return makeRoAck(story.RunningOrderId);
             })
         );

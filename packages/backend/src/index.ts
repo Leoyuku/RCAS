@@ -45,7 +45,10 @@ import { runStartupChecks }           from './shared/startup-check';
         process.exit(1);
     }
 
-    // ── 2. 初始化 MOS 连接（含数据恢复） ──────────────────────────────────────
+    // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
+    rundownStore.init();
+
+    // ── 3. 初始化 MOS 连接（含磁盘数据恢复） ──────────────────────────────────
     const mosConnector = new MosConnector();
     try {
         await mosConnector.init();
@@ -54,7 +57,7 @@ import { runStartupChecks }           from './shared/startup-check';
         process.exit(1);
     }
 
-    // ── 3. 初始化 Express ──────────────────────────────────────────────────────
+    // ── 4. 初始化 Express ──────────────────────────────────────────────────────
     const app = express();
     app.use(express.json());
     app.use(cors());
@@ -81,30 +84,31 @@ import { runStartupChecks }           from './shared/startup-check';
         const all = rundownStore.getAllRundowns();
         res.json({
             count:    all.length,
-            rundowns: all.map(ro => ({
-                roID:       ro.ID,
-                roSlug:     ro.Slug,
-                storyCount: ro.Stories.length,
+            rundowns: all.map(r => ({
+                id:           r.externalId,
+                name:         r.name,
+                segmentCount: r.segments?.length ?? 0,
+                status:       r.status,
             })),
         });
     });
 
     /** 获取单个节目单完整数据 */
-    app.get('/rundowns/:roID', (req: Request, res: Response) => {
-        const roID = req.params['roID'] as string;
-        const ro   = rundownStore.getRundown(roID);
-        if (!ro) {
-            res.status(404).json({ error: `RO not found: ${roID}` });
+    app.get('/rundowns/:id', (req: Request, res: Response) => {
+        const id = req.params['id'] as string;
+        const r  = rundownStore.getRundown(id);
+        if (!r) {
+            res.status(404).json({ error: `Rundown not found: ${id}` });
             return;
         }
-        res.json(ro);
+        res.json(r);
     });
 
-    // ── 4. 创建 HTTP server + 挂载 socket.io ──────────────────────────────────
+    // ── 5. 创建 HTTP server + 挂载 socket.io ──────────────────────────────────
     const httpServer   = http.createServer(app);
     const socketServer = new SocketServer(httpServer);
 
-    // ── 5. 启动监听 ───────────────────────────────────────────────────────────
+    // ── 6. 启动监听 ───────────────────────────────────────────────────────────
     await new Promise<void>((resolve) => {
         httpServer.listen(config.port, () => resolve());
     });
@@ -116,56 +120,28 @@ import { runStartupChecks }           from './shared/startup-check';
     logger.info(`║  WS   : ws://localhost:${config.port}           ║`);
     logger.info('╚══════════════════════════════════════╝');
 
-    // ── 6. 优雅关闭 ───────────────────────────────────────────────────────────
+    // ── 7. 优雅关闭 ───────────────────────────────────────────────────────────
+    const shutdown = async (signal: string) => {
+        logger.info(`[Shutdown] Received ${signal}, shutting down gracefully...`);
 
-    let isShuttingDown = false;
-
-    const gracefulShutdown = async (signal: string): Promise<void> => {
-        if (isShuttingDown) {
-            logger.warn(`[Shutdown] Already shutting down, ignoring ${signal}`);
-            return;
-        }
-        isShuttingDown = true;
-        logger.info(`[Shutdown] Received ${signal}, starting graceful shutdown...`);
-
-        await new Promise<void>((resolve) => {
-            httpServer.close(() => {
-                logger.info('[Shutdown] HTTP server closed.');
-                resolve();
-            });
+        // 停止接受新请求
+        httpServer.close(() => {
+            logger.info('[Shutdown] HTTP server closed.');
         });
 
-        await socketServer.dispose();
+        // 关闭 socket.io
+        await socketServer.close();
+        logger.info('[Shutdown] Socket.io closed.');
 
-        try {
-            await mosConnector.dispose();
-        } catch (err) {
-            logger.error('[Shutdown] Error closing MOS connections:', err);
-        }
+        // 关闭 MOS 连接
+        await mosConnector.dispose();
+        logger.info('[Shutdown] MOS connector closed.');
 
-        logger.info('[Shutdown] Waiting for pending disk writes...');
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        logger.info('[Shutdown] Graceful shutdown complete. Bye.');
+        logger.info('[Shutdown] Goodbye.');
         process.exit(0);
     };
 
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
-
-    process.on('uncaughtException', (err: Error) => {
-        logger.error('[FATAL] Uncaught Exception:', {
-            message: err.message,
-            stack:   err.stack,
-        });
-        process.exit(1);
-    });
-
-    process.on('unhandledRejection', (reason: unknown) => {
-        logger.error('[FATAL] Unhandled Promise Rejection:', {
-            reason: reason instanceof Error ? reason.message : String(reason),
-        });
-        process.exit(1);
-    });
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
 
 })();
