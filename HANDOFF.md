@@ -125,8 +125,8 @@ IMOSRunningOrder          →  IRundown
 
 ## 六、关键架构决策（已定论，勿推翻）
 
-1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos / 真实 NCS 是 MOS Client（NCS）
-2. **连接模式**：后端监听 10540/10541/10542，NCS 主动连入（openRelay 模式）
+1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos扮演 NCS的角色
+2. **连接模式**：后端监听 10540/10541/10542，在lower port上作为客户端，主动连接NCS的loweerport; 在upper port上作为服务器，等待NCS连接到upper port
 3. **持久化格式**：`data/rundowns/_index.json`（索引）+ `data/rundowns/{roID}.json`（完整数据）
 4. **Profile 支持**：Profile 0 + 2 + 4，拒绝 1/3/5/6/7
 5. **部署形态**：当前 Monolith（单进程），预留 Microservice 扩展点
@@ -163,5 +163,5 @@ npm run start
 3. 如需了解架构全貌，读项目知识库中的 `ARCHITECTURE.md` 和 `README.md`
 4. 如需了解当前代码，重点看：
    - `packages/backend/src/modules/1_mos_connection/mos-connection.ts`（回调注册）
-   - `packages/backend/src/store/rundown-store.ts`（状态管理）
+   - `packages/backend/src/3_store/rundown-store.ts`（状态管理）
    - `packages/core-lib/src/models/`（目标数据类型）
