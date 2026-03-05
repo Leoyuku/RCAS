@@ -11,7 +11,7 @@
 
 import { MosConnection } from './connector/MosConnection';
 import { MosDevice } from './connector/MosDevice';
-import { getMosTypes,IMOSString128 } from './internals/mosTypes';
+import { IMOSString128,getMosTypes } from './internals/mosTypes';
 import { IConnectionConfig } from './connector/api';
 import {
     IMOSListMachInfo,
@@ -37,6 +37,7 @@ import {
 } from './internals/model';
 import { rundownStore } from '../3_store/rundown-store';
 import { logger } from '../../shared/logger';
+import { config } from '../../shared/config';
 
 const mosTypes = getMosTypes(true);
 
@@ -117,8 +118,8 @@ export class MosConnector {
     constructor() {
         logger.info('[MosConnector] Initializing...');
 
-        const config: IConnectionConfig = {
-            mosID: process.env.MOS_ID || 'rcas.mos',
+        const connectionConfig: IConnectionConfig = {
+            mosID: config.mosID,
             acceptsConnections: true,
             profiles: {
                 '0': true,
@@ -131,10 +132,10 @@ export class MosConnector {
                 '7': false,
             },
             strict: true,
-            debug: process.env.NODE_ENV !== 'production',
+            debug: !config.isProduction,
         };
 
-        this.mosConnection = new MosConnection(config);
+        this.mosConnection = new MosConnection(connectionConfig);
 
         this.mosConnection.on('error', (error: Error) => {
             logger.error('[MOS] Connection error:', {
@@ -151,6 +152,14 @@ export class MosConnector {
 
         this.mosConnection.onConnection((mosDevice: MosDevice) => {
             const deviceID = mosTypes.mosString128.stringify(mosDevice.ID);
+
+            // NCS 白名单校验：配置了白名单时，拒绝不在名单内的连接
+            if (config.mosAllowedNcsIDs.length > 0 &&
+                !config.mosAllowedNcsIDs.includes(deviceID)) {
+                logger.warn(`[MosConnector] Rejected connection from "${deviceID}" — not in MOS_ALLOWED_NCS_IDS whitelist`);
+                return;
+            }
+
             const isReconnect = this._connectedDevices.has(deviceID);
             this._connectedDevices.set(deviceID, mosDevice);
             logger.info(
@@ -167,20 +176,20 @@ export class MosConnector {
         await rundownStore.restore();
         await this.mosConnection.init();
 
-        const lower = process.env.MOS_PORT_LOWER || 10540;
-        const upper = process.env.MOS_PORT_UPPER || 10541;
-        const query = process.env.MOS_PORT_QUERY  || 10542;
-        logger.info(`[MosConnector] Listening on MOS ports ${lower}/${upper}/${query}`);
+        logger.info(`[MosConnector] Listening on MOS ports ${config.mosPortLower}/${config.mosPortUpper}/${config.mosPortQuery}`);
 
-        if (process.env.MOS_CONNECT_HOST) {
-            const host      = process.env.MOS_CONNECT_HOST;
-            const mosId     = process.env.MOS_CONNECT_ID          || 'quick.mos';
-            const lowerPort = parseInt(process.env.MOS_CONNECT_PORT_LOWER || '11540');
-            const upperPort = parseInt(process.env.MOS_CONNECT_PORT_UPPER || '11541');
-            const queryPort = parseInt(process.env.MOS_CONNECT_PORT_QUERY || '11542');
-            logger.info(`[MosConnector] Dev mode: connecting to "${mosId}" @ ${host}:${lowerPort}/${upperPort}/${queryPort}`);
+        if (config.mosConnectHost) {
+            logger.info(`[MosConnector] Dev mode: connecting to "${config.mosConnectID}" @ ${config.mosConnectHost}:${config.mosConnectPortLower}/${config.mosConnectPortUpper}/${config.mosConnectPortQuery}`);
             await this.mosConnection.connect({
-                primary: { id: mosId, host, ports: { lower: lowerPort, upper: upperPort, query: queryPort } },
+                primary: {
+                    id:    config.mosConnectID,
+                    host:  config.mosConnectHost,
+                    ports: {
+                        lower: config.mosConnectPortLower,
+                        upper: config.mosConnectPortUpper,
+                        query: config.mosConnectPortQuery,
+                    },
+                },
             });
         }
 
@@ -223,10 +232,10 @@ export class MosConnector {
                 manufacturer: mosTypes.mosString128.create('RCAS'),
                 model:        mosTypes.mosString128.create('RCAS Backend'),
                 hwRev:        mosTypes.mosString128.create('1.0'),
-                swRev:        mosTypes.mosString128.create(process.env.npm_package_version || '1.0.0'),
+                swRev:        mosTypes.mosString128.create(config.version),
                 DOM:          mosTypes.mosString128.create('2024-01-01'),
-                SN:           mosTypes.mosString128.create(process.env.MOS_SERIAL || 'SN-RCAS-001'),
-                ID:           mosTypes.mosString128.create(process.env.MOS_ID     || 'rcas.mos'),
+                SN:           mosTypes.mosString128.create(config.mosSerial),
+                ID:           mosTypes.mosString128.create(config.mosID),
                 time:         mosTypes.mosTime.create(Date.now()),
                 mosRev:       mosTypes.mosString128.create('2.8.4'),
                 supportedProfiles: {

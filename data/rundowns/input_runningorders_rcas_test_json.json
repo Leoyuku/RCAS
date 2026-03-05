@@ -1,0 +1,172 @@
+{
+  "roID": "input_runningorders_rcas_test_json",
+  "roSlug": "晚间新闻联播",
+  "savedAt": "2026-03-05T16:17:05.160Z",
+  "data": {
+    "ID": {
+      "_mosString128": "input_runningorders_rcas_test_json"
+    },
+    "Slug": {
+      "_mosString128": "晚间新闻联播"
+    },
+    "DefaultChannel": {
+      "_mosString128": "A"
+    },
+    "Stories": [
+      {
+        "ID": {
+          "_mosString128": "STORY-OPEN"
+        },
+        "Slug": {
+          "_mosString128": "开场白"
+        },
+        "Items": [
+          {
+            "ID": {
+              "_mosString128": "ITEM-OPEN-01"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-OPEN-001"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "开场白:片头"
+            },
+            "ObjectSlug": {
+              "_mosString128": "晚间新闻片头"
+            },
+            "Duration": 1800,
+            "TimeBase": 25
+          }
+        ],
+        "Number": {
+          "_mosString128": "A1"
+        }
+      },
+      {
+        "ID": {
+          "_mosString128": "STORY-POLITICS"
+        },
+        "Slug": {
+          "_mosString128": "时政要闻"
+        },
+        "Items": [
+          {
+            "ID": {
+              "_mosString128": "ITEM-POL-01"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-POL-001"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "时政要闻:画面"
+            },
+            "ObjectSlug": {
+              "_mosString128": "人大会议画面"
+            },
+            "Duration": 3000,
+            "TimeBase": 25
+          },
+          {
+            "ID": {
+              "_mosString128": "ITEM-POL-02"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-POL-002"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "时政要闻:图表"
+            },
+            "ObjectSlug": {
+              "_mosString128": "经济数据图表"
+            },
+            "Duration": 600,
+            "TimeBase": 25
+          }
+        ],
+        "Number": {
+          "_mosString128": "A2"
+        }
+      },
+      {
+        "ID": {
+          "_mosString128": "STORY-ECONOMY"
+        },
+        "Slug": {
+          "_mosString128": "经济新闻"
+        },
+        "Items": [
+          {
+            "ID": {
+              "_mosString128": "ITEM-ECO-01"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-ECO-001"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "经济新闻:采访"
+            },
+            "ObjectSlug": {
+              "_mosString128": "专家采访画面"
+            },
+            "Duration": 4500,
+            "TimeBase": 25
+          }
+        ],
+        "Number": {
+          "_mosString128": "A3"
+        }
+      },
+      {
+        "ID": {
+          "_mosString128": "STORY-SPORTS"
+        },
+        "Slug": {
+          "_mosString128": "体育新闻"
+        },
+        "Items": [
+          {
+            "ID": {
+              "_mosString128": "ITEM-SPO-01"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-SPO-001"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "体育新闻:集锦"
+            },
+            "ObjectSlug": {
+              "_mosString128": "足球联赛集锦"
+            },
+            "Duration": 5400,
+            "TimeBase": 25
+          },
+          {
+            "ID": {
+              "_mosString128": "ITEM-SPO-02"
+            },
+            "ObjectID": {
+              "_mosString128": "OBJ-SPO-002"
+            },
+            "MOSID": "quick.mos",
+            "Slug": {
+              "_mosString128": "体育新闻:字幕"
+            },
+            "ObjectSlug": {
+              "_mosString128": "比分字幕条"
+            },
+            "Duration": 300,
+            "TimeBase": 25
+          }
+        ],
+        "Number": {
+          "_mosString128": "A4"
+        }
+      }
+    ]
+  }
+}

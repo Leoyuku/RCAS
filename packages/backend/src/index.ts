@@ -3,12 +3,11 @@
  *
  * 启动顺序：
  *   1. 加载环境变量（dotenv，必须最先执行）
- *   2. 初始化日志系统
+ *   2. 启动自检（端口、目录、配置、磁盘空间）
  *   3. 初始化 MosConnector（含磁盘数据恢复 + MOS 端口监听）
- *   4. 创建 HTTP server
- *   5. 挂载 socket.io（必须在 HTTP server 创建之后）
- *   6. 启动 HTTP server 监听
- *   7. 注册进程信号处理（优雅关闭）
+ *   4. 创建 HTTP server + 挂载 socket.io
+ *   5. 启动 HTTP server 监听
+ *   6. 注册进程信号处理（优雅关闭）
  *
  * 优雅关闭顺序：
  *   1. 停止接受新 HTTP 请求
@@ -28,6 +27,8 @@ import { MosConnector }               from './modules/1_mos_connection/mos-conne
 import { rundownStore }               from './modules/3_store/rundown-store';
 import { SocketServer }               from './modules/3_store/socket-server';
 import { logger }                     from './shared/logger';
+import { config }                     from './shared/config';
+import { runStartupChecks }           from './shared/startup-check';
 
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
 
@@ -36,7 +37,15 @@ import { logger }                     from './shared/logger';
     logger.info('║       RCAS Backend Starting...       ║');
     logger.info('╚══════════════════════════════════════╝');
 
-    // ── 1. 初始化 MOS 连接（含数据恢复） ──────────────────────────────────────
+    // ── 1. 启动自检 ───────────────────────────────────────────────────────────
+    try {
+        await runStartupChecks();
+    } catch (err) {
+        logger.error('[Startup] Pre-flight checks failed. Aborting.');
+        process.exit(1);
+    }
+
+    // ── 2. 初始化 MOS 连接（含数据恢复） ──────────────────────────────────────
     const mosConnector = new MosConnector();
     try {
         await mosConnector.init();
@@ -45,10 +54,8 @@ import { logger }                     from './shared/logger';
         process.exit(1);
     }
 
-    // ── 2. 初始化 Express ──────────────────────────────────────────────────────
-    const app  = express();
-    const port = parseInt(process.env.PORT || '3000');
-
+    // ── 3. 初始化 Express ──────────────────────────────────────────────────────
+    const app = express();
     app.use(express.json());
     app.use(cors());
 
@@ -56,17 +63,16 @@ import { logger }                     from './shared/logger';
 
     /** 健康检查 */
     app.get('/health', (_req: Request, res: Response) => {
-        const devices = mosConnector.getConnectedDevices();
         res.json({
             status:           'ok',
             uptime:           Math.floor(process.uptime()),
             mosConnected:     mosConnector.isAnyDeviceConnected(),
-            connectedDevices: devices,
+            connectedDevices: mosConnector.getConnectedDevices(),
             rundownCount:     rundownStore.count,
             rundownIDs:       rundownStore.getAllIDs(),
             socketClients:    socketServer.clientCount,
-            version:          process.env.npm_package_version || '1.0.0',
-            nodeEnv:          process.env.NODE_ENV || 'development',
+            version:          config.version,
+            nodeEnv:          config.nodeEnv,
         });
     });
 
@@ -94,25 +100,20 @@ import { logger }                     from './shared/logger';
         res.json(ro);
     });
 
-    // ── 3. 创建 HTTP server ────────────────────────────────────────────────────
-    // 必须用 http.createServer(app) 而不是 app.listen()
-    // socket.io 需要接管这个 server 才能共享同一个端口
-    const httpServer = http.createServer(app);
-
-    // ── 4. 挂载 socket.io ─────────────────────────────────────────────────────
-    // socketServer 在此声明，供 /health 接口引用 clientCount
+    // ── 4. 创建 HTTP server + 挂载 socket.io ──────────────────────────────────
+    const httpServer   = http.createServer(app);
     const socketServer = new SocketServer(httpServer);
 
     // ── 5. 启动监听 ───────────────────────────────────────────────────────────
     await new Promise<void>((resolve) => {
-        httpServer.listen(port, () => resolve());
+        httpServer.listen(config.port, () => resolve());
     });
 
     logger.info('╔══════════════════════════════════════╗');
     logger.info('║         RCAS Backend Ready           ║');
-    logger.info(`║  MOS  : 10540 / 10541 / 10542        ║`);
-    logger.info(`║  HTTP : http://localhost:${port}         ║`);
-    logger.info(`║  WS   : ws://localhost:${port}           ║`);
+    logger.info(`║  MOS  : ${config.mosPortLower} / ${config.mosPortUpper} / ${config.mosPortQuery}        ║`);
+    logger.info(`║  HTTP : http://localhost:${config.port}         ║`);
+    logger.info(`║  WS   : ws://localhost:${config.port}           ║`);
     logger.info('╚══════════════════════════════════════╝');
 
     // ── 6. 优雅关闭 ───────────────────────────────────────────────────────────
@@ -127,7 +128,6 @@ import { logger }                     from './shared/logger';
         isShuttingDown = true;
         logger.info(`[Shutdown] Received ${signal}, starting graceful shutdown...`);
 
-        // 步骤1：停止接受新 HTTP 请求
         await new Promise<void>((resolve) => {
             httpServer.close(() => {
                 logger.info('[Shutdown] HTTP server closed.');
@@ -135,17 +135,14 @@ import { logger }                     from './shared/logger';
             });
         });
 
-        // 步骤2：关闭所有 socket.io 连接（前端会触发自动重连）
         await socketServer.dispose();
 
-        // 步骤3：关闭 MOS 连接（主动断开，NCS 知道是计划内关闭）
         try {
             await mosConnector.dispose();
         } catch (err) {
             logger.error('[Shutdown] Error closing MOS connections:', err);
         }
 
-        // 步骤4：等待持久化防抖定时器全部触发（600ms > 防抖的 500ms）
         logger.info('[Shutdown] Waiting for pending disk writes...');
         await new Promise(resolve => setTimeout(resolve, 600));
 

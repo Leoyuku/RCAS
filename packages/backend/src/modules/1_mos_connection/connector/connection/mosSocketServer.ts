@@ -87,7 +87,7 @@ export class MosSocketServer extends EventEmitter<MosSocketServerEvents> {
 					})
 				})
 
-				this._socketServer.listen(this._port)
+				this._socketServer.listen(this._port, '0.0.0.0')
 			} catch (e) {
 				reject(e)
 			}
