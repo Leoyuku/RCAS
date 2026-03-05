@@ -37,17 +37,16 @@ packages/backend/src/
 │   │   ├── mos-connection.ts         ← MosConnector 类，注册所有回调
 │   │   └── connector/                ← Sofie MOS 协议实现（勿动）
 │   ├── 2_ingest/                     ⬅️ 【下一步工作目标】（目录存在，内容为空）
-│   ├── 3_store/                      （注意：实际文件在 store/ 下，见备注）
-│   └── 4_domain_engine/              ❌ 尚未开始
+│   ├── 3_store/                      ✅ 完成
+│   │   ├── rundown-store.ts          ← 核心状态管理，存储 IMOSRunningOrder
+│   │   ├── json-persistence.ts       ← 持久化到 data/rundowns/*.json
+│   │   ├── socket-server.ts          ← Socket.io 实时推送
+│   │   └── logger.ts                 ← Winston 日志
+│   ├── 4_domain_engine/              ❌ 尚未开始
 │   └── 5_playout_controllers/        ❌ 尚未开始
-└── store/                            ✅ 完成（实际存放位置，非 3_store/）
-    ├── rundown-store.ts              ← 核心状态管理，存储 IMOSRunningOrder
-    ├── json-persistence.ts           ← 持久化到 data/rundowns/*.json
-    ├── socket-server.ts              ← Socket.io 实时推送
-    └── logger.ts                     ← Winston 日志
 ```
 
-**⚠️ 目录备注：** `3_store/` 目录存在但为空，实际 store 代码在 `store/` 下。这是历史遗留，不是紧急任务。
+**目录说明：** 早期曾有独立的 `store/` 目录，后来发现与总体架构思路有重合，已将所有文件迁移至 `modules/3_store/` 并删除了原 `store/` 目录，现目录结构与架构设计完全对齐。
 
 ---
 
