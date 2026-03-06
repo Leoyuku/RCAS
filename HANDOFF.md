@@ -126,10 +126,10 @@ IMOSRunningOrder          →  IRundown
 └── mos-to-rundown.ts     ← 纯函数转换（IMOSRunningOrder → IRundown）
 
 3_domain_engine/store/
-├── rundown-store.ts      ← 现有，存 IMOSRunningOrder，emit 事件
-├── ingest-store.ts       ← 【新建】存 IRundown，业务真相来源
+├── rundown-store.ts      ← 原 ingest-store，存 IRundown（业务真相来源）
+├── mos-cache.ts          ← 原 rundown-store，存 IMOSRunningOrder
 ├── json-persistence.ts   ← 现有
-└── socket-server.ts      ← 现有（后续改为订阅 ingest-store）
+└── socket-server.ts      ← 已订阅新 rundown-store
 ```
 
 ---

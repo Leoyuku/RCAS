@@ -203,6 +203,15 @@ function _updateIndex(): void {
     try {
         const files = fs.readdirSync(DATA_DIR)
             .filter(f => f.endsWith('.json') && !f.startsWith('_'));
+        // 没有 RO 时删除索引文件，保持目录干净
+        if (files.length === 0) {
+            if (fs.existsSync(INDEX_FILE)) {
+                fs.unlinkSync(INDEX_FILE);
+                logger.debug('[Persistence] Removed empty index file.');
+            }
+            return;
+        }
+
         const index: IndexFile = {
             version:   1,
             updatedAt: new Date().toISOString(),

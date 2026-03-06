@@ -5,6 +5,17 @@
  *   1. 后端已启动
  *   2. quick-mos 已连接后端
  *   3. rcas-test.json 已放入 quick-mos/input/runningorders/
+ *
+ * 注意：v2.2 架构重构后，REST API 返回 IRundown 而非 IMOSRunningOrder。
+ * 字段映射：
+ *   ro.ID      → ro.externalId
+ *   ro.Slug    → ro.name
+ *   ro.Stories → ro.segments
+ *   s.ID       → s.externalId
+ *   s.Slug     → s.name
+ *   s.Items    → s.parts
+ *   item.ID    → item.externalId
+ *   item.Slug  → item.title
  */
 
 import fs from 'fs'
@@ -35,28 +46,30 @@ function str(v) {
     return String(v)
 }
 
-function storyIds(ro) { return (ro?.Stories ?? []).map(s => str(s.ID)) }
+// IRundown 字段访问器
+function segmentIds(ro) { return (ro?.segments ?? []).map(s => str(s.externalId)) }
 function wait(ms) { return new Promise(r => setTimeout(r, ms)) }
 function readFile() { return fs.readFileSync(RUNDOWN_FILE, 'utf8') }
 function writeFile(content) { fs.writeFileSync(RUNDOWN_FILE, content, 'utf8') }
 
-function writeRundown(slug, stories) {
+function writeRundown(slug, segments) {
+    // 注意：writeRundown 写的是 quick-mos 的输入格式（MOS 原始格式），不是 IRundown
     const runningOrder = {
         ID: 'RCAS-TEST-RO-001',
         Slug: slug,
         DefaultChannel: 'A',
-        Stories: stories.map(s => ({
-            ID: str(s.ID),
-            Slug: str(s.Slug),
-            Number: str(s.Number) || 'A1',
-            Items: (s.Items ?? []).map(item => ({
-                ID: str(item.ID),
-                Slug: str(item.Slug),
-                ObjectID: str(item.ObjectID),
+        Stories: segments.map(s => ({
+            ID: str(s.externalId),
+            Slug: str(s.name),
+            Number: 'A1',
+            Items: (s.parts ?? []).map(item => ({
+                ID: str(item.externalId),
+                Slug: str(item.title),
+                ObjectID: str(item.externalId),
                 MOSID: 'quick.mos',
-                ObjectSlug: str(item.ObjectSlug || item.Slug),
-                Duration: item.Duration ?? item.EditorialDuration ?? 1000,
-                TimeBase: item.TimeBase ?? 25,
+                ObjectSlug: str(item.title),
+                Duration: 1000,
+                TimeBase: 25,
             }))
         }))
     }
@@ -80,15 +93,16 @@ async function fetchAllROs() {
     } catch { return [] }
 }
 
+// IRundown 格式打印
 function printRO(ro) {
     if (!ro) { console.log(err('RO 不存在')); return }
-    console.log(tip(`RO ID:   ${str(ro.ID)}`))
-    console.log(tip(`RO Slug: ${str(ro.Slug)}`))
-    console.log(tip(`Stories (${ro.Stories?.length ?? 0}):`))
-    for (const s of ro.Stories ?? []) {
-        console.log(`         ${c.dim}[${str(s.ID)}] ${str(s.Slug) || '(无Slug)'} — ${s.Items?.length ?? 0} 个 Item${c.reset}`)
-        for (const item of s.Items ?? []) {
-            console.log(`           ${c.dim}└─ Item[${str(item.ID)}] ${str(item.Slug) || ''}${c.reset}`)
+    console.log(tip(`RO ID:     ${str(ro.externalId)}`))
+    console.log(tip(`RO Name:   ${str(ro.name)}`))
+    console.log(tip(`Segments (${ro.segments?.length ?? 0}):`))
+    for (const s of ro.segments ?? []) {
+        console.log(`         ${c.dim}[${str(s.externalId)}] ${str(s.name) || '(无名称)'} — ${s.parts?.length ?? 0} 个 Part${c.reset}`)
+        for (const part of s.parts ?? []) {
+            console.log(`           ${c.dim}└─ Part[${str(part.externalId)}] ${str(part.title) || ''}${c.reset}`)
         }
     }
 }
@@ -108,7 +122,7 @@ const steps = [
             const ro = await fetchRO(RO_ID)
             printRO(ro)
             if (!ro) { console.log(err('RO 不存在！请确认 quick-mos 已启动并连接后端')); return false }
-            const ids = storyIds(ro)
+            const ids = segmentIds(ro)
             const ok1 = ids.includes('STORY-OPEN')
             const ok2 = ids.includes('STORY-POLITICS')
             const ok3 = ids.includes('STORY-ECONOMY')
@@ -128,10 +142,10 @@ const steps = [
 
     {
         name: 'roMetadataReplace',
-        desc: '修改 RO Slug，验证 Stories 顺序不变',
+        desc: '修改 RO Slug，验证 Segments 顺序不变',
         run: async () => {
             const before = await fetchRO(RO_ID)
-            const beforeIds = storyIds(before)
+            const beforeIds = segmentIds(before)
             const json = JSON.parse(readFile())
             json.runningOrder.Slug = '晚间新闻联播（已更新）'
             writeFile(JSON.stringify(json, null, 2))
@@ -139,11 +153,11 @@ const steps = [
             await wait(WAIT_MS)
             const after = await fetchRO(RO_ID)
             printRO(after)
-            const slugOk    = str(after?.Slug).includes('已更新')
-            const storiesOk = JSON.stringify(storyIds(after)) === JSON.stringify(beforeIds)
-            console.log(slugOk    ? ok('Slug 已更新')      : err('Slug 未更新'))
-            console.log(storiesOk ? ok('Stories 顺序不变') : err('Stories 发生了变化'))
-            return slugOk && storiesOk
+            const nameOk     = str(after?.name).includes('已更新')
+            const segmentsOk = JSON.stringify(segmentIds(after)) === JSON.stringify(beforeIds)
+            console.log(nameOk     ? ok('Name 已更新')        : err('Name 未更新'))
+            console.log(segmentsOk ? ok('Segments 顺序不变')  : err('Segments 发生了变化'))
+            return nameOk && segmentsOk
         },
     },
 
@@ -164,7 +178,7 @@ const steps = [
             await wait(WAIT_MS)
             const ro = await fetchRO(RO_ID)
             printRO(ro)
-            const ids = storyIds(ro)
+            const ids = segmentIds(ro)
             const newIdx      = ids.indexOf('STORY-NEW')
             const politicsIdx = ids.indexOf('STORY-POLITICS')
             const inserted = newIdx !== -1
@@ -188,9 +202,9 @@ const steps = [
             await wait(WAIT_MS)
             const ro = await fetchRO(RO_ID)
             printRO(ro)
-            const s = (ro?.Stories ?? []).find(s => str(s.ID) === 'STORY-ECONOMY')
-            const replaced = str(s?.Slug).includes('财经深度报道')
-            console.log(replaced ? ok('STORY-ECONOMY Slug 已替换') : err('替换失败'))
+            const s = (ro?.segments ?? []).find(s => str(s.externalId) === 'STORY-ECONOMY')
+            const replaced = str(s?.name).includes('财经深度报道')
+            console.log(replaced ? ok('STORY-ECONOMY name 已替换') : err('替换失败'))
             return replaced
         },
     },
@@ -200,17 +214,17 @@ const steps = [
         desc: '将 STORY-SPORTS 移到最前面',
         run: async () => {
             const before = await fetchRO(RO_ID)
-            const stories = [...(before?.Stories ?? [])]
-            const idx = stories.findIndex(s => str(s.ID) === 'STORY-SPORTS')
+            const segments = [...(before?.segments ?? [])]
+            const idx = segments.findIndex(s => str(s.externalId) === 'STORY-SPORTS')
             if (idx === -1) { console.log(err('找不到 STORY-SPORTS')); return false }
-            const [sports] = stories.splice(idx, 1)
-            stories.unshift(sports)
-            writeRundown(str(before.Slug), stories)
+            const [sports] = segments.splice(idx, 1)
+            segments.unshift(sports)
+            writeRundown(str(before.name), segments)
             console.log(tip('已将 STORY-SPORTS 移到最前，等待推送...'))
             await wait(WAIT_MS)
             const ro = await fetchRO(RO_ID)
             printRO(ro)
-            const ids = storyIds(ro)
+            const ids = segmentIds(ro)
             const sportsFirst = ids[0] === 'STORY-SPORTS'
             console.log(sportsFirst ? ok('STORY-SPORTS 已移到第一位') : err(`第一位是 ${ids[0]}`))
             return sportsFirst
@@ -222,22 +236,22 @@ const steps = [
         desc: '交换 STORY-OPEN 和 STORY-POLITICS 的位置',
         run: async () => {
             const before = await fetchRO(RO_ID)
-            const stories = [...(before?.Stories ?? [])]
-            const openIdx     = stories.findIndex(s => str(s.ID) === 'STORY-OPEN')
-            const politicsIdx = stories.findIndex(s => str(s.ID) === 'STORY-POLITICS')
+            const segments = [...(before?.segments ?? [])]
+            const openIdx     = segments.findIndex(s => str(s.externalId) === 'STORY-OPEN')
+            const politicsIdx = segments.findIndex(s => str(s.externalId) === 'STORY-POLITICS')
             if (openIdx === -1 || politicsIdx === -1) {
                 console.log(err('找不到 STORY-OPEN 或 STORY-POLITICS')); return false
             }
-            ;[stories[openIdx], stories[politicsIdx]] = [stories[politicsIdx], stories[openIdx]]
-            writeRundown(str(before.Slug), stories)
+            ;[segments[openIdx], segments[politicsIdx]] = [segments[politicsIdx], segments[openIdx]]
+            writeRundown(str(before.name), segments)
             console.log(tip('已交换 STORY-OPEN 和 STORY-POLITICS，等待推送...'))
             await wait(WAIT_MS)
             const after = await fetchRO(RO_ID)
             printRO(after)
-            const afterIds = storyIds(after)
+            const afterIds = segmentIds(after)
             const swapped = afterIds.indexOf('STORY-POLITICS') === openIdx &&
                             afterIds.indexOf('STORY-OPEN')     === politicsIdx
-            console.log(swapped ? ok('Story 位置已互换') : err(`互换失败，当前顺序: ${afterIds.join(', ')}`))
+            console.log(swapped ? ok('Segment 位置已互换') : err(`互换失败，当前顺序: ${afterIds.join(', ')}`))
             return swapped
         },
     },
@@ -247,16 +261,16 @@ const steps = [
         desc: '删除 STORY-NEW',
         run: async () => {
             const before = await fetchRO(RO_ID)
-            const stories = (before?.Stories ?? []).filter(s => str(s.ID) !== 'STORY-NEW')
-            if (stories.length === (before?.Stories ?? []).length) {
+            const segments = (before?.segments ?? []).filter(s => str(s.externalId) !== 'STORY-NEW')
+            if (segments.length === (before?.segments ?? []).length) {
                 console.log(err('找不到 STORY-NEW')); return false
             }
-            writeRundown(str(before.Slug), stories)
+            writeRundown(str(before.name), segments)
             console.log(tip('已删除 STORY-NEW，等待推送...'))
             await wait(WAIT_MS)
             const ro = await fetchRO(RO_ID)
             printRO(ro)
-            const deleted = !storyIds(ro).includes('STORY-NEW')
+            const deleted = !segmentIds(ro).includes('STORY-NEW')
             console.log(deleted ? ok('STORY-NEW 已删除') : err('STORY-NEW 仍然存在'))
             return deleted
         },
@@ -264,7 +278,7 @@ const steps = [
 
     {
         name: 'roReplace',
-        desc: '完整替换整个 RO（全新 Stories 结构）',
+        desc: '完整替换整个 RO（全新 Segments 结构）',
         run: async () => {
             const newJson = {
                 runningOrder: {
@@ -283,11 +297,11 @@ const steps = [
             await wait(WAIT_MS)
             const ro = await fetchRO(RO_ID)
             printRO(ro)
-            const ids = storyIds(ro)
+            const ids = segmentIds(ro)
             const replaced = ids.includes('STORY-REPLACED-1') && ids.includes('STORY-REPLACED-2')
             const oldGone  = !ids.includes('STORY-OPEN') && !ids.includes('STORY-POLITICS')
-            console.log(replaced ? ok('新 Stories 已存在') : err('新 Stories 不存在'))
-            console.log(oldGone  ? ok('旧 Stories 已消失') : err('旧 Stories 仍然存在'))
+            console.log(replaced ? ok('新 Segments 已存在') : err('新 Segments 不存在'))
+            console.log(oldGone  ? ok('旧 Segments 已消失') : err('旧 Segments 仍然存在'))
             return replaced && oldGone
         },
     },
