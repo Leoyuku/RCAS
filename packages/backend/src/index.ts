@@ -4,10 +4,12 @@
  * 启动顺序：
  *   1. 加载环境变量（dotenv，必须最先执行）
  *   2. 启动自检（端口、目录、配置、磁盘空间）
- *   3. 初始化 MosConnector（含磁盘数据恢复 + MOS 端口监听）
- *   4. 创建 HTTP server + 挂载 socket.io
- *   5. 启动 HTTP server 监听
- *   6. 注册进程信号处理（优雅关闭）
+ *   3. 初始化 RundownStore（订阅 MosCache 事件）
+ *   4. 从磁盘恢复持久化索引（不自动激活）
+ *   5. 初始化 MOS 连接（开始监听 NCS）
+ *   6. 创建 HTTP server + 挂载 socket.io
+ *   7. 启动 HTTP server 监听
+ *   8. 注册进程信号处理（优雅关闭）
  *
  * 优雅关闭顺序：
  *   1. 停止接受新 HTTP 请求
@@ -48,7 +50,10 @@ import { runStartupChecks }           from './shared/startup-check';
     // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
     rundownStore.init();
 
-    // ── 3. 初始化 MOS 连接（含磁盘数据恢复） ──────────────────────────────────
+    // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
+    await rundownStore.restore();
+
+    // ── 4. 初始化 MOS 连接 ────────────────────────────────────────────────────
     const mosConnector = new MosConnector();
     try {
         await mosConnector.init();
@@ -57,7 +62,7 @@ import { runStartupChecks }           from './shared/startup-check';
         process.exit(1);
     }
 
-    // ── 4. 初始化 Express ──────────────────────────────────────────────────────
+    // ── 5. 初始化 Express ──────────────────────────────────────────────────────
     const app = express();
     app.use(express.json());
     app.use(cors());
@@ -79,36 +84,43 @@ import { runStartupChecks }           from './shared/startup-check';
         });
     });
 
-    /** 获取所有节目单摘要 */
+    /** 获取所有已知 Rundown 摘要（含 persisted 未激活的） */
     app.get('/rundowns', (_req: Request, res: Response) => {
-        const all = rundownStore.getAllRundowns();
+        const summaries = rundownStore.getAllSummaries();
         res.json({
-            count:    all.length,
-            rundowns: all.map(r => ({
-                id:           r.externalId,
-                name:         r.name,
-                segmentCount: r.segments?.length ?? 0,
-                status:       r.status,
-            })),
+            count:     summaries.length,
+            rundowns:  summaries,
         });
     });
 
-    /** 获取单个节目单完整数据 */
+    /** 获取单个 Rundown 完整数据（仅内存中激活/待命的） */
     app.get('/rundowns/:id', (req: Request, res: Response) => {
         const id = req.params['id'] as string;
         const r  = rundownStore.getRundown(id);
         if (!r) {
-            res.status(404).json({ error: `Rundown not found: ${id}` });
+            res.status(404).json({ error: `Rundown "${id}" not found or not loaded` });
             return;
         }
         res.json(r);
     });
 
-    // ── 5. 创建 HTTP server + 挂载 socket.io ──────────────────────────────────
+    /** 激活一个 Rundown（导播手动选择） */
+    app.post('/rundowns/:id/activate', (req: Request, res: Response) => {
+        const id = req.params['id'] as string;
+        const ok = rundownStore.activate(id);
+        if (!ok) {
+            res.status(404).json({ error: `Rundown "${id}" not found` });
+            return;
+        }
+        const rundown = rundownStore.getRundown(id);
+        res.json({ ok: true, id, lifecycle: rundownStore.getLifecycle(id), rundown });
+    });
+
+    // ── 6. 创建 HTTP server + 挂载 socket.io ──────────────────────────────────
     const httpServer   = http.createServer(app);
     const socketServer = new SocketServer(httpServer);
 
-    // ── 6. 启动监听 ───────────────────────────────────────────────────────────
+    // ── 7. 启动监听 ───────────────────────────────────────────────────────────
     await new Promise<void>((resolve) => {
         httpServer.listen(config.port, () => resolve());
     });
@@ -120,20 +132,17 @@ import { runStartupChecks }           from './shared/startup-check';
     logger.info(`║  WS   : ws://localhost:${config.port}           ║`);
     logger.info('╚══════════════════════════════════════╝');
 
-    // ── 7. 优雅关闭 ───────────────────────────────────────────────────────────
+    // ── 8. 优雅关闭 ───────────────────────────────────────────────────────────
     const shutdown = async (signal: string) => {
         logger.info(`[Shutdown] Received ${signal}, shutting down gracefully...`);
 
-        // 停止接受新请求
         httpServer.close(() => {
             logger.info('[Shutdown] HTTP server closed.');
         });
 
-        // 关闭 socket.io
         await socketServer.close();
         logger.info('[Shutdown] Socket.io closed.');
 
-        // 关闭 MOS 连接
         await mosConnector.dispose();
         logger.info('[Shutdown] MOS connector closed.');
 
