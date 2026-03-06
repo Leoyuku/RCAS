@@ -36,8 +36,8 @@ packages/backend/src/
 │   │   ├── mos-connection.ts                   ← MosConnector 类，注册所有回调
 │   │   └── connector/                          ← Sofie MOS 协议实现（勿动）
 │   │
-│   ├── 2_ingest/                               ⬅️ 【下一步工作目标】
-│   │   └── (待实现)
+│   ├── 2_ingest/                               ✅ 完成（mosRunningOrderToRundown 纯函数）
+│   │
 │   │
 │   ├── 3_domain_engine/                        🔲 部分框架已存在
 │   │   ├── store/                              ✅ 完成（原 3_store 迁移至此）
@@ -94,7 +94,41 @@ NCS (quick-mos)
 
 ---
 
-## 五、下一步：第五轮 —— `2_ingest` 数据转换层
+## 五、Rundown 状态模型（已定论）
+
+### 四种状态
+
+| 状态 | 标记 | 说明 |
+|------|------|------|
+| 已保存 persisted | 💾 | 存在于磁盘，未加载进内存。来源：上次直播遗留，NCS 尚未删除 |
+| 待命 standby | 🟡 | 已加载进内存，但当前有其他 Rundown 正在播出，等待导播手动切换 |
+| 激活 active | 🟢 | 当前导播正在使用的 Rundown，同时只能有一个 |
+| 播出中 on-air | 🔴 | active 状态下且已执行第一个 Take，最需要保护的状态 |
+
+### 自动激活规则
+
+**核心原则：空闲时完全自动，播出中需要人工确认。**
+
+- NCS 推送新 Rundown 时：
+  - 若当前无正在播出的 Rundown → 直接自动激活，前端立刻显示
+  - 若当前有 Rundown 处于 on-air 状态 → 新 Rundown 进入 standby，前端显示提示条，导播手动确认切换
+
+### 工作流程
+```
+开播前  → 从 NCS 推送 Rundown → 自动激活 → 导播选择播出
+直播中  → NCS 可更新 Rundown → 自动同步（不中断播出）
+直播后  → 从 NCS 删除 Rundown → 后端自动清理持久化文件
+```
+
+### 启动恢复行为
+
+后端重启时**不自动恢复**持久化数据到激活状态。
+只加载索引，让导播在 Rundown 选择器里按需选择加载。
+理由：重启后的状态不一定是导播想要的状态，保持导播的主动控制权。
+
+---
+
+## 六、下一步：第五轮 —— `2_ingest` 数据转换层
 
 ### 目标
 将 `IMOSRunningOrder`（MOS 协议原始对象）转换为 RCAS 内部的 `IRundown`（业务域对象）。
@@ -134,7 +168,7 @@ IMOSRunningOrder          →  IRundown
 
 ---
 
-## 六、关键架构决策（已定论，勿推翻）
+## 七、关键架构决策（已定论，勿推翻）
 
 1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos 扮演 NCS 的角色
 2. **连接模式**：后端监听 10540/10541/10542；lower port 主动连接 NCS；upper port 等待 NCS 连接
@@ -145,7 +179,7 @@ IMOSRunningOrder          →  IRundown
 
 ---
 
-## 七、开发环境
+## 八、开发环境
 ```bash
 # 启动后端
 cd ~/rcas/packages/backend
@@ -167,7 +201,7 @@ npm run start
 
 ---
 
-## 八、快速上手（新对话首要步骤）
+## 九、快速上手（新对话首要步骤）
 
 1. 读本文件（已完成）
 2. 如需了解某轮细节，读 `/mnt/transcripts/journal.txt` 找对应 transcript

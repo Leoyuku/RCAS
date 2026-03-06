@@ -228,6 +228,7 @@ NCS (iNEWS / ENPS / quick-mos)
 | `shared/startup-check` | ✅ 完成 | 端口/目录/磁盘/配置自检 |
 | HTTP REST API | ✅ 完成 | `/health`、`/rundowns`、`/rundowns/:roID` |
 | `2_ingest` | ✅ 已完成（mosRunningOrderToRundown 纯函数）
+| 前端 / domain engine | 🔲 规划中 | Rundown 状态模型已定论，见 HANDOFF.md |
 | `3_domain_engine/engine` | 🔲 待实现 | 播出状态机、Timeline Resolver |
 | `4_playout_controllers` | 🔲 待实现 | TSR 引擎、设备驱动 |
 
