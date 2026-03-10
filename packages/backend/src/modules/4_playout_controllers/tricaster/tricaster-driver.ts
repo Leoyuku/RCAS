@@ -17,6 +17,7 @@ import { tricasterClient, TricasterConnectionStatus } from './tricaster-client'
 import { rundownEngine }     from '../../3_domain_engine/engine/rundown-engine'
 import { logger }            from '../../../shared/logger'
 import type { RundownRuntime } from '../../../../../core-lib/src/socket/socket-contracts'
+import type { DeviceCommand } from '../../3_domain_engine/engine/resolver'
 
 // ─── 事件类型 ─────────────────────────────────────────────────────────────────
 
@@ -31,9 +32,9 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
     private _lastOnAirPartId: string | null = null
 
     init(): void {
-        // 监听 engine runtime 变化
-        rundownEngine.on('runtimeChanged', (runtime) => {
-            this._onRuntimeChanged(runtime)
+        // 监听 State Loop 输出的命令集
+        rundownEngine.on('commandsReady', (commands) => {
+            this._dispatchCommands(commands)
         })
 
         // 监听 Tricaster 连接状态变化，转发给上层
@@ -55,22 +56,10 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
 
     // ── Runtime 变化处理 ──────────────────────────────────────────────────────
 
-    private _onRuntimeChanged(runtime: RundownRuntime): void {
-
-        // onAirPartId 发生变化 → 执行 TAKE
-        if (runtime.onAirPartId !== null &&
-            runtime.onAirPartId !== this._lastOnAirPartId) {
-
-            logger.info(`[TricasterDriver] TAKE detected: "${runtime.onAirPartId}" → sending main_background_take`)
-            const ok = tricasterClient.sendShortcut('main_background_take')
-
-            if (ok) {
-                logger.info('[TricasterDriver] main_background_take sent ✅')
-            } else {
-                logger.warn('[TricasterDriver] main_background_take failed — Tricaster not connected')
-            }
-
-            this._lastOnAirPartId = runtime.onAirPartId
+    private _dispatchCommands(commands: DeviceCommand[]): void {
+        for (const cmd of commands) {
+            logger.info(`[TricasterDriver] Dispatching: ${cmd.shortcut}${cmd.value ? ` = ${cmd.value}` : ''} (layer: ${cmd.layer})`)
+            tricasterClient.sendShortcut(cmd.shortcut, cmd.value)
         }
     }
 

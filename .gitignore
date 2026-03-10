@@ -5,3 +5,4 @@ dist
 buildpackages/backend/logs/
 logs/
 data/
+\n# core-lib 编译产物\npackages/core-lib/src/**/*.js\npackages/core-lib/src/**/*.js.map

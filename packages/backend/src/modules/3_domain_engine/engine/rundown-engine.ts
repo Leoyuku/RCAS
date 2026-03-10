@@ -15,6 +15,10 @@
  *   前端 intent:* → SocketServer → RundownEngine → emit runtimeChanged → SocketServer → 前端 runtime:state
  */
 
+import { buildTimeline }          from './timeline-builder'
+import { resolve, diff }          from './resolver'
+import type { IPartInstance } from '../../../../../core-lib/src/models/part-instance-model'
+import type { DesiredState }      from './resolver'
 import { EventEmitter }  from 'eventemitter3';
 import { rundownStore }  from '../store/rundown-store';
 import { logger }        from '../../../shared/logger';
@@ -25,6 +29,7 @@ import type { IPart }    from '../../../../../core-lib/src/models/part-model';
 
 export interface RundownEngineEvents {
     runtimeChanged: (runtime: RundownRuntime) => void;
+    commandsReady: (commands: import('./resolver').DeviceCommand[]) => void
 }
 
 // ─── RundownEngine ────────────────────────────────────────────────────────────
@@ -32,6 +37,9 @@ export interface RundownEngineEvents {
 export class RundownEngine extends EventEmitter<RundownEngineEvents> {
 
     private _runtime: RundownRuntime | null = null;
+    private _partInstances: IPartInstance[]  = []
+    private _lastSentState: DesiredState     = new Map()
+    private _stateLoopTimer: NodeJS.Timeout | null = null
 
     // ── 初始化：监听 RundownStore 激活事件 ───────────────────────────────────
 
@@ -118,6 +126,22 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
 
         // 第一次 TAKE 时将 Rundown 升级为 on-air
         rundownStore.setOnAir(rundownId);
+        // 创建新的 PartInstance
+        const newInstance: IPartInstance = {
+            instanceId: `${takePartId}_${Date.now()}`,
+            rundownId,
+            part:       parts.find(p => p._id === takePartId)!,
+            startTime:  Date.now(),
+            ended:      false,
+            pieces:     [],
+        }
+
+        // 清理已结束的旧实例，加入新实例
+        this._partInstances = this._partInstances.filter(i => !i.ended)
+        this._partInstances.push(newInstance)
+
+        // 触发 State Loop
+        this._runStateLoop()
 
         logger.info(`[RundownEngine] TAKE → onAir: "${takePartId}", next: "${newNextId}"`);
         return { ok: true };
@@ -192,6 +216,21 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         return rundown.segments
             .sort((a, b) => a.rank - b.rank)
             .flatMap(seg => (seg.parts ?? []).sort((a, b) => a.rank - b.rank));
+    }
+
+    // ── State Loop ────────────────────────────────────────────────────────────
+
+    private _runStateLoop(): void {
+        const now             = Date.now()
+        const timelineObjects = buildTimeline(this._partInstances)
+        const desiredState    = resolve(timelineObjects, now)
+        const commands        = diff(desiredState, this._lastSentState)
+
+        if (commands.length > 0) {
+            logger.info(`[RundownEngine] State loop: ${commands.length} command(s) to dispatch`)
+            this.emit('commandsReady', commands)
+            this._lastSentState = desiredState
+        }
     }
 }
 
