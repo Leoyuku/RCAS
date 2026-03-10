@@ -33,6 +33,10 @@ interface RCASStore {
     // 操作
     activate: (id: string) => void
 
+    take:            () => void
+    sendToPreview:   () => void
+    setNext:         (partId: string) => void
+
     // 内部：初始化 socket 连接（在 App.tsx mount 时调用一次）
     _initSocket: () => void
 }
@@ -163,6 +167,27 @@ export const useRCASStore = create<RCASStore>((set) => ({
             } else {
                 console.error('[Socket] Activate failed:', result.error)
             }
+        })
+    },
+
+    take: () => {
+        if (!socket) return
+        socket.emit('intent:take', (result) => {
+            if (!result.ok) console.error('[Socket] TAKE failed:', result.error)
+        })
+    },
+
+    sendToPreview: () => {
+        if (!socket) return
+        socket.emit('intent:sendToPreview', (result) => {
+            if (!result.ok) console.error('[Socket] SEND TO PREVIEW failed:', result.error)
+        })
+    },
+
+    setNext: (partId: string) => {
+        if (!socket) return
+        socket.emit('intent:setNext', { partId }, (result) => {
+            if (!result.ok) console.error('[Socket] SET NEXT failed:', result.error)
         })
     },
 }))
