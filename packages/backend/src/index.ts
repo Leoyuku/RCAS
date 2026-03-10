@@ -32,6 +32,7 @@ import { SocketServer }               from './modules/3_domain_engine/store/sock
 import { logger }                     from './shared/logger';
 import { config }                     from './shared/config';
 import { runStartupChecks }           from './shared/startup-check';
+import { tricasterDriver } from './modules/4_playout_controllers/tricaster/tricaster-driver'
 
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ import { runStartupChecks }           from './shared/startup-check';
     // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
     rundownStore.init();
     rundownEngine.init();
+    tricasterDriver.init()
 
     // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
     await rundownStore.restore();

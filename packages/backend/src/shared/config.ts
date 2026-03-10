@@ -41,6 +41,12 @@ export const config = {
     // Socket.io
     socketCorsOrigin: process.env.SOCKET_CORS_ORIGIN || '*',
 
+    // ─── Tricaster 设备配置 ───────────────────────────────────────────────────────
+    // Tricaster 设备配置
+    tricasterHost:    process.env.TRICASTER_HOST    ?? '192.168.17.159',
+    tricasterPort:    parseInt(process.env.TRICASTER_PORT ?? '80'),
+    tricasterEnabled: process.env.TRICASTER_ENABLED !== 'false',
+
     // 版本
     version: process.env.npm_package_version || '1.0.0',
 } as const;
