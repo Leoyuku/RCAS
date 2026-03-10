@@ -48,6 +48,9 @@ export interface IPartInstance {
     /** 是否已结束 */
     ended:       boolean
 
+    /** 是否是预监实例（SEND TO PREVIEW 时创建，TAKE 时替换为正式实例） */
+    isPreview?: boolean
+
     /** 实际生效的 Pieces（Blueprint 计算后填入） */
     pieces:      IPiece[]
 }

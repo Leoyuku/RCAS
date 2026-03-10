@@ -26,8 +26,9 @@ import { logger }              from '../../../shared/logger'
 // ─── Blueprint 规则：Part 类型识别 ───────────────────────────────────────────
 
 /**
- * 根据 Part 的 title/externalId 识别类型
- * 待真实 Octopus 数据后调整识别规则
+ * TODO: [BLUEPRINT] 当前为临时识别规则，基于title关键词猜测类型
+ * 待获取真实Octopus数据后，需根据实际字段（itemSlug/mosExternalMetadata等）重写
+ * 搜索 "TODO: [BLUEPRINT]" 可找到所有需要更新的位置
  */
 export function detectPartType(title: string): PartType {
     const upper = title.toUpperCase()
@@ -52,7 +53,7 @@ function getPreviewSource(type: PartType): string | null {
         case PartType.VO:      return 'DDR1'     // 配音也走 DDR
         case PartType.LIVE:    return 'Input5'   // 连线信号
         case PartType.GRAPHICS: return null      // 全屏图文，不切视频源
-        case PartType.UNKNOWN: return null       // 未知类型，不预设输入源
+        case PartType.UNKNOWN: return 'Input1'   // TODO: [BLUEPRINT] 临时默认值，待真实Octopus数据后按业务规则映射
         default:               return null
     }
 }
@@ -106,19 +107,21 @@ function buildPartTimeline(instance: IPartInstance): ITimelineObject[] {
         })
     }
 
-    // ② TAKE 命令：在 startTime 触发切换
-    objects.push({
-        id:         `${instanceId}_take`,
-        layer:      'video.take',
-        enable:     { start: startTime, duration: 100 }, // 100ms 脉冲
-        priority:   1,
-        content: {
-            deviceType: DeviceType.ABSTRACT,
-            type:       'tricaster_shortcut',
-            shortcut:   'main_background_take',
-        },
-        objectType: TimelineObjType.RUNDOWN,
-    })
+    // ② TAKE 命令：只在正式播出实例（非 preview）时触发
+    if (!(instance as any).isPreview) {
+        objects.push({
+            id:         `${instanceId}_take`,
+            layer:      'video.take',
+            enable:     { start: startTime, duration: 100 },
+            priority:   1,
+            content: {
+                deviceType: DeviceType.ABSTRACT,
+                type:       'tricaster_shortcut',
+                shortcut:   'main_background_take',
+            },
+            objectType: TimelineObjType.RUNDOWN,
+        })
+    }
 
     logger.debug(`[TimelineBuilder] Part "${part._id}" (${partType}): ${objects.length} objects`)
     return objects

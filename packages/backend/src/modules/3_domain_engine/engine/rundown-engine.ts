@@ -75,6 +75,9 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         rundownStore.on('rundownDeleted', (id) => {
             if (this._runtime?.rundownId === id) {
                 this._runtime = null;
+                this._stopStateLoop()
+                this._partInstances = []
+                this._lastSentState = new Map()
                 logger.info(`[RundownEngine] Runtime cleared: rundown "${id}" deleted.`);
             }
         });
@@ -137,12 +140,11 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         }
 
         // 清理已结束的旧实例，加入新实例
-        this._partInstances = this._partInstances.filter(i => !i.ended)
+        this._partInstances = this._partInstances.filter(i => !i.ended && !(i as any).isPreview)
         this._partInstances.push(newInstance)
 
         // 触发 State Loop
-        this._runStateLoop()
-
+        this._startStateLoop()
         logger.info(`[RundownEngine] TAKE → onAir: "${takePartId}", next: "${newNextId}"`);
         return { ok: true };
     }
@@ -189,6 +191,27 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
             nextPartId:    null,
         });
 
+        // SEND TO PREVIEW 时提前设置 Preview 源
+        // 创建一个 PreviewInstance，让 Timeline Builder 生成 preview 相关的 TimelineObject
+        const parts      = this._getAllParts(this._runtime.rundownId)
+        const previewPart = parts.find(p => p._id === nextPartId)
+        if (previewPart) {
+            const previewInstance: IPartInstance = {
+                instanceId: `${nextPartId}_preview_${Date.now()}`,
+                rundownId:  this._runtime.rundownId,
+                part:       previewPart,
+                startTime:  Date.now(),
+                ended:      false,
+                pieces:     [],
+                isPreview:  true,
+            }
+            this._partInstances = this._partInstances.filter(i => !(i as any).isPreview)
+            this._partInstances.push(previewInstance)
+            this._lastSentState.delete('video.preview')
+            this._startStateLoop()
+            this._tickStateLoop() // 立即触发一次，不等心跳
+        }
+
         logger.info(`[RundownEngine] SEND TO PREVIEW → "${nextPartId}"`);
         return { ok: true };
     }
@@ -220,14 +243,45 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
 
     // ── State Loop ────────────────────────────────────────────────────────────
 
-    private _runStateLoop(): void {
-        const now             = Date.now()
+    /**
+     * 启动持续心跳（每100ms执行一次）
+     * 让系统真正"时间驱动"：duration到期、AdLib触发等都由心跳自动处理
+     */
+    private _startStateLoop(): void {
+        if (this._stateLoopTimer) return // 已在运行
+        logger.info('[RundownEngine] State loop started.')
+        this._stateLoopTimer = setInterval(() => {
+            this._tickStateLoop()
+        }, 100)
+    }
+
+    private _stopStateLoop(): void {
+        if (this._stateLoopTimer) {
+            clearInterval(this._stateLoopTimer)
+            this._stateLoopTimer = null
+            logger.info('[RundownEngine] State loop stopped.')
+        }
+    }
+
+    private _tickStateLoop(): void {
+        if (this._partInstances.length === 0) return
+
+        // 清理已结束超过10秒的旧实例
+        const now = Date.now()
+        this._partInstances = this._partInstances.filter(i => {
+            if (i.ended && i.endTime && now - i.endTime > 10_000) {
+                logger.debug(`[RundownEngine] PartInstance "${i.instanceId}" expired, removing.`)
+                return false
+            }
+            return true
+        })
+
         const timelineObjects = buildTimeline(this._partInstances)
         const desiredState    = resolve(timelineObjects, now)
         const commands        = diff(desiredState, this._lastSentState)
 
         if (commands.length > 0) {
-            logger.info(`[RundownEngine] State loop: ${commands.length} command(s) to dispatch`)
+            logger.info(`[RundownEngine] State loop tick: ${commands.length} command(s)`)
             this.emit('commandsReady', commands)
             this._lastSentState = desiredState
         }

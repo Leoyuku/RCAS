@@ -229,7 +229,7 @@ export class RundownStore extends EventEmitter<RundownStoreEvents> {
     // ── 设置 on-air 状态（第一个 Take 时由 engine 调用） ─────────────────────
 
     setOnAir(id: string): boolean {
-        if (this._lifecycles.get(id) !== 'active') {
+        if (this._lifecycles.get(id) !== 'active' && this._lifecycles.get(id) !== 'on-air') {
             logger.warn(`[RundownStore] setOnAir: "${id}" is not active.`);
             return false;
         }
