@@ -35,6 +35,7 @@ export interface ServerToClientEvents {
     'rundown:deleted':   (payload: { id: string }) => void;
     'rundown:activated': (payload: { id: string; rundown: IRundown }) => void;
     'rundown:standby':   (payload: { id: string }) => void;
+    'runtime:state': (payload: RundownRuntime) => void;
     'rundown:lifecycle': (payload: { id: string; lifecycle: LifecycleStatus }) => void;
 }
 
@@ -43,4 +44,26 @@ export interface ClientToServerEvents {
         payload: { id: string },
         callback?: (result: { ok: boolean; error?: string }) => void
     ) => void;
+
+    'intent:take':          (callback?: (result: { ok: boolean; error?: string }) => void) => void;
+    'intent:sendToPreview': (callback?: (result: { ok: boolean; error?: string }) => void) => void;
+    'intent:setNext':       (payload: { partId: string }, callback?: (result: { ok: boolean; error?: string }) => void) => void;
+}
+
+// ─── Runtime Engine 状态 ─────────────────────────────────────────────────────
+
+/**
+ * Engine 状态机的六个核心状态
+ */
+export type EngineState = 'STOPPED' | 'READY' | 'RUNNING' | 'TAKING' | 'TRANSITION' | 'ERROR'
+
+/**
+ * Runtime 状态快照（服务端维护，推送给前端）
+ */
+export interface RundownRuntime {
+    rundownId:     string
+    engineState:   EngineState
+    onAirPartId:   string | null
+    previewPartId: string | null
+    nextPartId:    string | null
 }

@@ -21,6 +21,7 @@
 
 // ── 必须第一行：加载 .env 文件 ────────────────────────────────────────────────
 import 'dotenv/config';
+import { rundownEngine } from './modules/3_domain_engine/engine/rundown-engine';
 
 import http                           from 'http';
 import express, { Request, Response } from 'express';
@@ -49,6 +50,7 @@ import { runStartupChecks }           from './shared/startup-check';
 
     // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
     rundownStore.init();
+    rundownEngine.init();
 
     // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
     await rundownStore.restore();

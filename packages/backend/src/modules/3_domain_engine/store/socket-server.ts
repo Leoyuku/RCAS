@@ -20,6 +20,7 @@
  *   activate                导播请求激活某个 Rundown  { id }
  */
 
+import { rundownEngine } from '../engine/rundown-engine';
 import { Server as HttpServer }             from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { rundownStore }                     from './rundown-store';
@@ -91,6 +92,27 @@ export class SocketServer {
             socket.on('error', (err) => {
                 logger.error(`[SocketServer] Socket error from ${clientID}:`, { message: err.message });
             });
+
+            // intent: TAKE
+            socket.on('intent:take', (callback) => {
+                logger.info(`[SocketServer] intent:take from ${clientID}`);
+                const result = rundownEngine.intentTake();
+                if (callback) callback(result);
+            });
+
+            // intent: SEND TO PREVIEW
+            socket.on('intent:sendToPreview', (callback) => {
+                logger.info(`[SocketServer] intent:sendToPreview from ${clientID}`);
+                const result = rundownEngine.intentSendToPreview();
+                if (callback) callback(result);
+            });
+
+            // intent: SET NEXT
+            socket.on('intent:setNext', (payload, callback) => {
+                logger.info(`[SocketServer] intent:setNext from ${clientID}: "${payload?.partId}"`);
+                const result = rundownEngine.intentSetNext(payload?.partId);
+                if (callback) callback(result);
+            });
         });
     }
 
@@ -127,6 +149,12 @@ export class SocketServer {
         rundownStore.on('lifecycleChanged', (id, lifecycle) => {
             logger.debug(`[SocketServer] Broadcasting rundown:lifecycle → ${id} (${lifecycle})`);
             this._io.emit('rundown:lifecycle', { id, lifecycle });
+        });
+
+        // 订阅 engine runtime 变化，推送给所有前端客户端
+        rundownEngine.on('runtimeChanged', (runtime) => {
+            logger.debug(`[SocketServer] Broadcasting runtime:state → engineState: ${runtime.engineState}`);
+            this._io.emit('runtime:state', runtime);
         });
     }
 

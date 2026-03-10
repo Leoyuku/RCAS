@@ -14,6 +14,7 @@ import { io, Socket } from 'socket.io-client'
 import { create } from 'zustand/react'
 import type {
     RundownSummary,
+    RundownRuntime,
     ServerToClientEvents,
     ClientToServerEvents,
 } from '../../../core-lib/src/socket/socket-contracts'
@@ -26,6 +27,8 @@ interface RCASStore {
 
     // Rundown 摘要列表（来自服务端 snapshot / rundown:* 事件）
     summaries: RundownSummary[]
+
+    runtime: RundownRuntime | null
 
     // 操作
     activate: (id: string) => void
@@ -43,6 +46,7 @@ let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null
 export const useRCASStore = create<RCASStore>((set) => ({
     connected: false,
     summaries: [],
+    runtime: null,
 
     _initSocket: () => {
         if (socket) return // 防止重复初始化
@@ -142,6 +146,12 @@ export const useRCASStore = create<RCASStore>((set) => ({
                     s.id === id ? { ...s, lifecycle } : s
                 )
             }))
+        })
+
+        // Runtime Engine 状态
+        socket.on('runtime:state', (runtime) => {
+            console.log('[Socket] runtime:state', runtime.engineState, runtime)
+            set({ runtime })
         })
     },
 
