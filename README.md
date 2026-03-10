@@ -114,11 +114,25 @@ RCAS/
 ├── packages/
 │   ├── backend/      # 【后端核心】自动化核心服务
 │   ├── frontend/     # 【前端界面】状态可视化与人工干预（尚未开始）
-│   └── core-lib/     # 【类型定义】系统通用语言（Models）
+│   └── core-lib/     # 【共享契约】系统通用语言（Models + Socket契约）
 ├── .env.example
 ├── .env              # 不提交 git
 └── package.json
 ```
+### 5.1.1 core-lib 依赖规则
+
+core-lib 是系统的唯一共享层，依赖关系严格单向：
+
+- `backend` → `core-lib`（允许）
+- `frontend` → `core-lib`（允许）
+- `backend` ↔ `frontend`（**禁止直接依赖**）
+
+core-lib 内部结构：
+packages/core-lib/src/
+├── models/               # 业务域模型（IRundown / ISegment / IPart / IPiece / ITimeline）
+├── socket/               # Socket.io 前后端通信契约
+│   └── socket-contracts.ts  # LifecycleStatus / RundownSummary / ServerToClientEvents / ClientToServerEvents
+└── events/               # 内部事件总线契约（AppEventMap）
 
 ### 5.2 后端内部架构
 
@@ -227,10 +241,11 @@ NCS (iNEWS / ENPS / quick-mos)
 | `shared/config` | ✅ 完成 | 环境变量统一管理 |
 | `shared/startup-check` | ✅ 完成 | 端口/目录/磁盘/配置自检 |
 | HTTP REST API | ✅ 完成 | `/health`、`/rundowns`、`/rundowns/:roID` |
-| `2_ingest` | ✅ 已完成（mosRunningOrderToRundown 纯函数）
+| `2_ingest` | ✅ 完成 | `mosRunningOrderToRundown` 纯函数，IMOSRunningOrder → IRundown |
 | 前端 / domain engine | 🔲 规划中 | Rundown 状态模型已定论，见 HANDOFF.md |
 | `3_domain_engine/engine` | 🔲 待实现 | 播出状态机、Timeline Resolver |
 | `4_playout_controllers` | 🔲 待实现 | TSR 引擎、设备驱动 |
+| `core-lib` | ✅ 完成 | Models + Socket契约（socket-contracts.ts），backend/frontend 解耦 |
 
 **Profile 2 验证结论：9/9 全部通过（含架构重构后回归验证）。**
 

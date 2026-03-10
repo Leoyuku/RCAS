@@ -34,20 +34,21 @@ import { mosRunningOrderToRundown } from '../../2_ingest/mos-to-rundown';
 import { loadAllPersistedROs, persistRO, deletePersistedRO } from './json-persistence';
 import { logger }       from '../../../shared/logger';
 import { IRundown }     from '../../../../../core-lib/src/models/rundown-model';
+import { LifecycleStatus, RundownSummary } from '../../../../../core-lib/src/socket/socket-contracts';
 import { getMosTypes }  from '../../1_mos_connection/internals/mosTypes';
 
 const mosTypes = getMosTypes(false);
 
 // ─── 生命周期状态 ──────────────────────────────────────────────────────────────
 
-export type LifecycleStatus = 'persisted' | 'standby' | 'active' | 'on-air';
+//export type LifecycleStatus = 'persisted' | 'standby' | 'active' | 'on-air';
 
-export interface RundownSummary {
+/* export interface RundownSummary {
     id:              string;
     name:            string;
     lifecycle:       LifecycleStatus;
     segmentCount:    number;
-}
+} */
 
 // ─── 事件类型 ─────────────────────────────────────────────────────────────────
 

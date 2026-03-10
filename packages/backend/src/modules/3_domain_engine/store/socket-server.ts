@@ -22,13 +22,13 @@
 
 import { Server as HttpServer }             from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { rundownStore, RundownSummary, LifecycleStatus } from './rundown-store';
+import { rundownStore }                     from './rundown-store';
 import { logger }                           from '../../../shared/logger';
-import { IRundown }                         from '../../../../../core-lib/src/models/rundown-model';
+import { ServerToClientEvents, ClientToServerEvents } from '../../../../../core-lib/src/socket/socket-contracts';
 
 // ─── 类型定义（前端可复用） ───────────────────────────────────────────────────
 
-export interface ServerToClientEvents {
+/* export interface ServerToClientEvents {
     snapshot:              (payload: { summaries: RundownSummary[] }) => void;
     'rundown:created':     (payload: { id: string; rundown: IRundown; lifecycle: LifecycleStatus }) => void;
     'rundown:updated':     (payload: { id: string; rundown: IRundown }) => void;
@@ -40,7 +40,7 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     activate: (payload: { id: string }, callback?: (result: { ok: boolean; error?: string }) => void) => void;
-}
+} */
 
 // ─── SocketServer 类 ──────────────────────────────────────────────────────────
 

@@ -40,10 +40,11 @@ packages/backend/src/
 │   │
 │   │
 │   ├── 3_domain_engine/                        🔲 部分框架已存在
-│   │   ├── store/                              ✅ 完成（原 3_store 迁移至此）
-│   │   │   ├── rundown-store.ts                ← MOS 状态管理（IMOSRunningOrder）
-│   │   │   ├── json-persistence.ts             ← 持久化
-│   │   │   └── socket-server.ts                ← Socket.io 实时推送
+│   ├── store/                              ✅ 完成
+│   │   ├── mos-cache.ts                    ← MOS 协议缓冲，维护 IMOSRunningOrder
+│   │   ├── rundown-store.ts                ← 业务真相来源，维护 IRundown + 生命周期状态
+│   │   ├── json-persistence.ts             ← 持久化
+│   │   └── socket-server.ts                ← Socket.io 实时推送
 │   │   ├── blueprints/                         🔲 待实现
 │   │   ├── engine/                             🔲 待实现
 │   │   └── models/                             🔲 待实现
@@ -66,6 +67,7 @@ packages/backend/src/
 | 第三轮 | 目录架构对齐、启动自检（startup-check）、NCS 白名单配置 | ✅ |
 | 验证轮 | Profile 2 全部 9 个操作端到端验证（quick-mos → 后端 → 持久化）| ✅ |
 | 第四轮 | 架构重构：目录重命名对齐 Sofie 设计思想，3_store 并入 3_domain_engine/store | ✅ |
+| 第五轮 | 生命周期状态管理，restore 行为修正，REST API 更新，Socket.io 事件体系完善 | ✅ |
 
 **Profile 2 验证结论：9/9 全部通过（重构后验证无回归）。**
 
@@ -77,16 +79,26 @@ packages/backend/src/
 
 ## 四、当前数据流
 ```
+## 四、当前数据流
+
+更新为：
+
 NCS (quick-mos)
-    │  MOS 协议（TCP 10540/10541/10542）
+    │ MOS Protocol
     ▼
 1_mos_connection（MosConnector）
-    │  IMOSRunningOrder 对象
+    │ IMOSRunningOrder
     ▼
-3_domain_engine/store/RundownStore（内存 Map）
-    │
-    ├──▶ json-persistence → data/rundowns/*.json（持久化）
-    └──▶ socket-server → Socket.io → 前端（实时推送）
+3_domain_engine/store/MosCache
+    │ emit 事件
+    ▼
+2_ingest/mosRunningOrderToRundown（纯函数）
+    │ IRundown
+    ▼
+3_domain_engine/store/RundownStore
+    ├── 生命周期状态管理（persisted/standby/active/on-air）
+    ├── json-persistence → data/rundowns/*.json
+    └── socket-server → Socket.io → 前端门口 ✅
 ```
 
 **注意：RundownStore 目前存储的是原始 `IMOSRunningOrder`（MOS 协议对象）。
@@ -128,30 +140,29 @@ NCS (quick-mos)
 
 ---
 
-## 六、下一步：第五轮 —— `2_ingest` 数据转换层
 
-### 目标
-将 `IMOSRunningOrder`（MOS 协议原始对象）转换为 RCAS 内部的 `IRundown`（业务域对象）。
+## 六、下一步：前端开发
 
-### 架构决策（已定论）
-1. **映射关系**：MOS Story → ISegment，MOS Item → IPart（暂不生成 IPiece）
-2. **触发方式**：监听 `RundownStore` 事件（`roCreated`/`roReplaced` 等），事件驱动解耦
-3. **存储位置**：转换结果存入 `3_domain_engine/store/` 内新建的 `ingest-store.ts`
-4. **转换函数**：`2_ingest/mos-to-rundown.ts`，纯函数，无状态，无副作用
+技术栈：React + TypeScript + Zustand + Socket.io-client + Tailwind CSS
+位置：packages/frontend/
 
-### 转换映射关系
-```
-IMOSRunningOrder          →  IRundown
-  .ID (IMOSString128)     →    .externalId (string)
-  .Slug                   →    .name
-  .EditorialStart         →    .expectedStart
-  .EditorialDuration      →    .expectedDuration
-  .Stories[]              →    .segments[]
-    Story.ID              →      ISegment.externalId
-    Story.Slug            →      ISegment.name
-    Story.Items[]         →      ISegment 下的 parts[]
-      Item.ID             →        IPart.externalId
-      Item.Slug           →        IPart.title
+第一轮目标（P0 只读部分）：
+- Rundown 选择器（显示所有已知 Rundown，含 persisted）
+- 连接状态指示
+- 激活后显示完整节目单（Segments + Parts）
+- Socket.io 实时同步
+
+Socket.io 事件对照表：
+  服务端 → 前端：
+    snapshot          { summaries: RundownSummary[] }
+    rundown:created   { id, rundown, lifecycle }
+    rundown:updated   { id, rundown }
+    rundown:deleted   { id }
+    rundown:activated { id, rundown }
+    rundown:standby   { id }
+    rundown:lifecycle { id, lifecycle }
+  前端 → 服务端：
+    activate          { id }  → callback: { ok, error? }
 ```
 
 ### 计划文件结构
