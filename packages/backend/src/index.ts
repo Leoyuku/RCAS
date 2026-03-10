@@ -56,6 +56,9 @@ import { tricasterDriver } from './modules/4_playout_controllers/tricaster/trica
 
     // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
     await rundownStore.restore();
+    
+    // ── 3.5 恢复播出运行时快照（必须在 rundownStore.restore() 之后）─────────
+    rundownEngine.restoreFromSnapshot()
 
     // ── 4. 初始化 MOS 连接 ────────────────────────────────────────────────────
     const mosConnector = new MosConnector();

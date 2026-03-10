@@ -21,6 +21,7 @@ import type { IPartInstance } from '../../../../../core-lib/src/models/part-inst
 import type { DesiredState }      from './resolver'
 import { EventEmitter }  from 'eventemitter3';
 import { rundownStore }  from '../store/rundown-store';
+import { saveRuntimeSnapshot, loadRuntimeSnapshot, clearRuntimeSnapshot } from './runtime-persistence'
 import { logger }        from '../../../shared/logger';
 import type { EngineState, RundownRuntime } from '../../../../../core-lib/src/socket/socket-contracts';
 import type { IPart }    from '../../../../../core-lib/src/models/part-model';
@@ -227,6 +228,10 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
     private _setRuntime(runtime: RundownRuntime): void {
         this._runtime = runtime;
         this.emit('runtimeChanged', runtime);
+        // 每次 runtime 变化时保存快照
+        if (runtime.engineState !== 'STOPPED') {
+            saveRuntimeSnapshot(runtime, this._partInstances)
+        }
     }
 
     /**
@@ -260,6 +265,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
             clearInterval(this._stateLoopTimer)
             this._stateLoopTimer = null
             logger.info('[RundownEngine] State loop stopped.')
+            clearRuntimeSnapshot()
         }
     }
 
@@ -285,6 +291,65 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
             this.emit('commandsReady', commands)
             this._lastSentState = desiredState
         }
+    }
+
+    // ── 崩溃恢复 ──────────────────────────────────────────────────────────────
+
+    public restoreFromSnapshot(): void {
+        const snapshot = loadRuntimeSnapshot()
+        if (!snapshot) return
+
+        const { runtime, partInstances } = snapshot
+
+        // 如果 Rundown 还在 persisted 状态，先激活加载进内存
+        const lifecycle = rundownStore.getLifecycle(runtime.rundownId)
+        if (lifecycle === 'persisted') {
+            logger.info(`[RundownEngine] Snapshot: activating persisted rundown "${runtime.rundownId}"`)
+            rundownStore.activate(runtime.rundownId)
+        }
+
+        // 验证对应的 Rundown 是否还存在
+        const rundown = rundownStore.getRundown(runtime.rundownId)
+        if (!rundown) {
+            logger.warn(`[RundownEngine] Snapshot rundown "${runtime.rundownId}" not in store, skipping restore.`)
+            clearRuntimeSnapshot()
+            return
+        }
+
+        // 恢复 PartInstances（从 RundownStore 重新查找 Part 对象）
+        const allParts = this._getAllParts(runtime.rundownId)
+        const restored: IPartInstance[] = []
+
+        for (const si of partInstances) {
+            const part = allParts.find(p => p._id === si.partId)
+            if (!part) {
+                logger.warn(`[RundownEngine] Snapshot part "${si.partId}" not found, skipping.`)
+                continue
+            }
+            restored.push({
+                instanceId: si.instanceId,
+                rundownId:  si.rundownId,
+                part,
+                startTime:  si.startTime,
+                endTime:    si.endTime,
+                ended:      si.ended,
+                pieces:     [],
+                ...(si.isPreview ? { isPreview: true } : {}),
+            } as IPartInstance)
+        }
+
+        this._partInstances = restored
+        this._runtime       = runtime
+
+        logger.info(`[RundownEngine] Restored from snapshot: engine=${runtime.engineState}, instances=${restored.length}`)
+
+        // 如果之前在播出中，恢复 State Loop
+        if (runtime.engineState === 'RUNNING' || runtime.engineState === 'READY') {
+            this._startStateLoop()
+        }
+
+        // 推送恢复后的 runtime 给前端
+        this.emit('runtimeChanged', runtime)
     }
 }
 
