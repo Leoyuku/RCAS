@@ -1,223 +1,203 @@
-# RCAS 项目交接备忘录
-**最后更新：2026-03-05**
-**用途：新对话开始时，读此文件即可立刻恢复上下文，无需翻阅历史 transcript。**
+# RCAS 项目 HANDOFF 文档
+# 新对话读到这里，立刻可以无缝衔接
 
 ---
 
-## 一、项目是什么
+## 你是谁，你在做什么
 
-**RCAS（自动化播出核心系统）**：一个广播级的自动化播出控制系统。
-- 从 NCS（新闻编辑系统）通过 **MOS 协议**接收节目单（Rundown）
-- 经过内部处理后，自动驱动播出设备（切换台、字幕机、VTR 等）
-- 核心哲学：**声明式、状态驱动**（描绘"蓝图"，由 TSR 引擎自动执行）
+你是 RCAS（播出控制自动化系统）的总体架构师，是行业的资深领军人物。
+RCAS 是一套新闻演播室播出控制系统，把 octopus/iNEWS（NCS）的节目单翻译成
+Tricaster / VIZ Engine / LAWO 三台设备的控制指令。
+导播通过 RCAS 完成 SET NEXT → SEND TO PREVIEW → TAKE 三步播出工作流。
 
-**代码仓库位置：** `~/rcas/`
-**Monorepo 结构：**
+---
+
+## 当前进度（2026-03-10）
+
+### 已完成
+- ✅ 系统架构设计规范 v2.5（见 Project Knowledge：RCAS_Frontend_Spec_v2.5.docx）
+- ✅ 后端核心模块（Node.js + TypeScript + Socket.io，端口 3000）
+  - MOS 协议解析（Profile 0/2/4，9/9 验证通过）
+  - RundownStore：内存状态 + 生命周期管理（persisted → standby → active → on-air）
+  - JSON 持久化（防抖500ms，data/rundowns/）
+  - Socket.io 事件体系（snapshot + intent 双向）
+- ✅ domain engine 完整实现
+  - 播出状态机（STOPPED → READY → RUNNING）
+  - PartInstance 生命周期（创建 → 播出 → 结束 → 10秒清理）
+  - State Loop 心跳（100ms，时间驱动）
+  - Timeline Builder（纯函数：PartInstances → TimelineObjects）
+  - Resolver + Diff Engine（纯函数：最小命令集）
+  - 崩溃恢复（runtime-persistence.ts，服务重启自动恢复 engine 状态）
+- ✅ Tricaster 设备驱动
+  - TricasterClient：双通道 WebSocket（控制 + 通知），指数退避重连
+  - TricasterDriver：监听 commandsReady → sendShortcut
+  - Tricaster IP：192.168.17.159（局域网，云端环境无法访问）
+- ✅ 前端 Step2 完成
+  - 三栏布局（Rundown列表 / ON AIR + PREVIEW + NEXT / 操作区）
+  - TAKE / SEND TO PREVIEW 按钮接通 engine
+  - Zustand store（runtime 状态 + 三个 intent 方法）
+
+### 端到端验证结论
+- SEND TO PREVIEW → `main_preview_source = Input1` ✅
+- TAKE → `main_background_take` ✅
+- 崩溃重启 → 自动恢复 engine=RUNNING + PartInstances ✅
+- Tricaster 命令发送：云端 ETIMEDOUT 为预期（局域网换环境后验证）
+
+### 尚未完成（按优先级）
+- ❌ Actual State 回路（change_notifications 接入，需要 Tricaster 在线）
+- ❌ TAKING / TRANSITION 状态机（TAKE 六步骤完整实现）
+- ❌ 前端完整节目单树（Segment/Part 层级 + Part 类型颜色）
+- ❌ 设备状态指示灯（前端显示 Tricaster/VIZ/LAWO 连接状态）
+- ❌ Blueprint 完善（等真实 Octopus 字段数据）
+- ❌ AdLib 面板
+- ❌ VIZ Engine / LAWO Driver
+
+---
+
+## 项目结构
 ```
-RCAS/
+/home/user/rcas/   （monorepo 根目录，npm start 启动后端）
 ├── packages/
-│   ├── backend/      ← 当前主要工作区
-│   ├── frontend/     ← 尚未开始
-│   └── core-lib/     ← 类型定义库（IRundown、ISegment 等已定义）
+│   ├── backend/src/
+│   │   ├── shared/
+│   │   │   ├── config.ts              PORT=3000, tricasterHost, tricasterEnabled
+│   │   │   ├── logger.ts
+│   │   │   └── startup-check.ts
+│   │   ├── modules/
+│   │   │   ├── 1_mos_connection/      MOS 协议接入（Sofie 移植，勿动）
+│   │   │   ├── 2_ingest/
+│   │   │   │   └── mos-to-rundown.ts  纯函数转换，Blueprint 临时规则
+│   │   │   ├── 3_domain_engine/
+│   │   │   │   ├── store/
+│   │   │   │   │   ├── rundown-store.ts
+│   │   │   │   │   ├── socket-server.ts
+│   │   │   │   │   ├── json-persistence.ts
+│   │   │   │   │   └── mos-cache.ts
+│   │   │   │   └── engine/
+│   │   │   │       ├── rundown-engine.ts       状态机 + PartInstance + State Loop
+│   │   │   │       ├── timeline-builder.ts     纯函数
+│   │   │   │       ├── resolver.ts             纯函数（resolve + diff）
+│   │   │   │       └── runtime-persistence.ts  崩溃恢复
+│   │   │   └── 4_playout_controllers/
+│   │   │       └── tricaster/
+│   │   │           ├── tricaster-client.ts     双通道 WebSocket
+│   │   │           └── tricaster-driver.ts     commandsReady → sendShortcut
+│   │   └── index.ts
+│   ├── frontend/src/
+│   │   ├── App.tsx                    三栏布局（Step2 完成）
+│   │   └── store/useRCASStore.ts      Zustand store
+│   └── core-lib/src/
+│       ├── models/
+│       │   ├── rundown-model.ts       IRundown / ISegment / IPart / IPiece
+│       │   └── part-instance-model.ts IPartInstance / PlayConfig / isPreview
+│       └── socket/
+│           └── socket-contracts.ts    全部事件契约
+├── data/
+│   ├── rundowns/                      Rundown JSON 持久化
+│   └── runtime/                       运行时快照（崩溃恢复）
+└── .idx/dev.nix                       Firebase Studio web preview 配置
 ```
 
 ---
 
-## 二、后端当前目录结构
-```
-packages/backend/src/
-├── index.ts                                    ← 启动入口
-├── shared/
-│   ├── logger.ts                               ✅ 完成
-│   ├── config.ts                               ✅ 完成
-│   └── startup-check.ts                        ✅ 完成
-├── modules/
-│   ├── 1_mos_connection/                       ✅ 完成（整体移植自 Sofie）
-│   │   ├── mos-connection.ts                   ← MosConnector 类，注册所有回调
-│   │   └── connector/                          ← Sofie MOS 协议实现（勿动）
-│   │
-│   ├── 2_ingest/                               ✅ 完成（mosRunningOrderToRundown 纯函数）
-│   │
-│   │
-│   ├── 3_domain_engine/                        🔲 部分框架已存在
-│   ├── store/                              ✅ 完成
-│   │   ├── mos-cache.ts                    ← MOS 协议缓冲，维护 IMOSRunningOrder
-│   │   ├── rundown-store.ts                ← 业务真相来源，维护 IRundown + 生命周期状态
-│   │   ├── json-persistence.ts             ← 持久化
-│   │   └── socket-server.ts                ← Socket.io 实时推送
-│   │   ├── blueprints/                         🔲 待实现
-│   │   ├── engine/                             🔲 待实现
-│   │   └── models/                             🔲 待实现
-│   │
-│   └── 4_playout_controllers/                  ❌ 尚未开始
+## Socket.io 事件体系（实际实现）
+
+### 服务端 → 客户端
+```typescript
+'snapshot'              // 连接时全量推送 { summaries, activeRundown, runtime }
+'rundown:created'       // { id, rundown }
+'rundown:updated'       // { id, rundown }
+'rundown:deleted'       // { id }
+'rundown:activated'     // { id, rundown }
+'rundown:standby'       // { id }
+'rundown:lifecycle'     // { id, lifecycle: LifecycleStatus }
+'runtime:state'         // RundownRuntime { rundownId, engineState, onAirPartId, previewPartId, nextPartId }
 ```
 
-**编号说明：** 编号代表数据流层级，不是开发顺序。
-`1`=协议接入，`2`=数据转换，`3`=核心引擎，`4`=播出控制。
-编号连续，无空缺。
-
----
-
-## 三、已完成的工作（按时间顺序）
-
-| 轮次 | 内容 | 状态 |
-|------|------|------|
-| 第一轮 | MOS 连接层（`1_mos_connection`），Profile 0/2/4 全部回调 | ✅ |
-| 第二轮 | 数据持久化（RundownStore + JSON）、Socket.io 实时推送、Winston 日志、优雅关闭 | ✅ |
-| 第三轮 | 目录架构对齐、启动自检（startup-check）、NCS 白名单配置 | ✅ |
-| 验证轮 | Profile 2 全部 9 个操作端到端验证（quick-mos → 后端 → 持久化）| ✅ |
-| 第四轮 | 架构重构：目录重命名对齐 Sofie 设计思想，3_store 并入 3_domain_engine/store | ✅ |
-| 第五轮 | 生命周期状态管理，restore 行为修正，REST API 更新，Socket.io 事件体系完善 | ✅ |
-
-**Profile 2 验证结论：9/9 全部通过（重构后验证无回归）。**
-
-**quick-mos bug 记录：** `refreshFiles()` 里 `Object.entries` 解构变量名对调，
-导致 `onDeletedRunningOrder` 传入的是 timestamp 而非 RO ID。
-修复位置：`packages/quick-mos/src/index.ts` 的 `refreshFiles()` 函数。
-
----
-
-## 四、当前数据流
-```
-## 四、当前数据流
-
-更新为：
-
-NCS (quick-mos)
-    │ MOS Protocol
-    ▼
-1_mos_connection（MosConnector）
-    │ IMOSRunningOrder
-    ▼
-3_domain_engine/store/MosCache
-    │ emit 事件
-    ▼
-2_ingest/mosRunningOrderToRundown（纯函数）
-    │ IRundown
-    ▼
-3_domain_engine/store/RundownStore
-    ├── 生命周期状态管理（persisted/standby/active/on-air）
-    ├── json-persistence → data/rundowns/*.json
-    └── socket-server → Socket.io → 前端门口 ✅
-```
-
-**注意：RundownStore 目前存储的是原始 `IMOSRunningOrder`（MOS 协议对象）。
-`2_ingest` 实现后，将转换为内部 `IRundown`，RundownStore 最终只存业务对象。**
-
----
-
-## 五、Rundown 状态模型（已定论）
-
-### 四种状态
-
-| 状态 | 标记 | 说明 |
-|------|------|------|
-| 已保存 persisted | 💾 | 存在于磁盘，未加载进内存。来源：上次直播遗留，NCS 尚未删除 |
-| 待命 standby | 🟡 | 已加载进内存，但当前有其他 Rundown 正在播出，等待导播手动切换 |
-| 激活 active | 🟢 | 当前导播正在使用的 Rundown，同时只能有一个 |
-| 播出中 on-air | 🔴 | active 状态下且已执行第一个 Take，最需要保护的状态 |
-
-### 自动激活规则
-
-**核心原则：空闲时完全自动，播出中需要人工确认。**
-
-- NCS 推送新 Rundown 时：
-  - 若当前无正在播出的 Rundown → 直接自动激活，前端立刻显示
-  - 若当前有 Rundown 处于 on-air 状态 → 新 Rundown 进入 standby，前端显示提示条，导播手动确认切换
-
-### 工作流程
-```
-开播前  → 从 NCS 推送 Rundown → 自动激活 → 导播选择播出
-直播中  → NCS 可更新 Rundown → 自动同步（不中断播出）
-直播后  → 从 NCS 删除 Rundown → 后端自动清理持久化文件
-```
-
-### 启动恢复行为
-
-后端重启时**不自动恢复**持久化数据到激活状态。
-只加载索引，让导播在 Rundown 选择器里按需选择加载。
-理由：重启后的状态不一定是导播想要的状态，保持导播的主动控制权。
-
----
-
-
-## 六、下一步：前端开发
-
-技术栈：React + TypeScript + Zustand + Socket.io-client + Tailwind CSS
-位置：packages/frontend/
-
-第一轮目标（P0 只读部分）：
-- Rundown 选择器（显示所有已知 Rundown，含 persisted）
-- 连接状态指示
-- 激活后显示完整节目单（Segments + Parts）
-- Socket.io 实时同步
-
-Socket.io 事件对照表：
-  服务端 → 前端：
-    snapshot          { summaries: RundownSummary[] }
-    rundown:created   { id, rundown, lifecycle }
-    rundown:updated   { id, rundown }
-    rundown:deleted   { id }
-    rundown:activated { id, rundown }
-    rundown:standby   { id }
-    rundown:lifecycle { id, lifecycle }
-  前端 → 服务端：
-    activate          { id }  → callback: { ok, error? }
-```
-
-### 计划文件结构
-```
-2_ingest/
-└── mos-to-rundown.ts     ← 纯函数转换（IMOSRunningOrder → IRundown）
-
-3_domain_engine/store/
-├── rundown-store.ts      ← 原 ingest-store，存 IRundown（业务真相来源）
-├── mos-cache.ts          ← 原 rundown-store，存 IMOSRunningOrder
-├── json-persistence.ts   ← 现有
-└── socket-server.ts      ← 已订阅新 rundown-store
+### 客户端 → 服务端
+```typescript
+'activate'              // { rundownId }
+'intent:take'           // 无参数
+'intent:sendToPreview'  // 无参数
+'intent:setNext'        // { partId }
 ```
 
 ---
 
-## 七、关键架构决策（已定论，勿推翻）
+## 核心 TypeScript 类型
+```typescript
+// core-lib/src/socket/socket-contracts.ts
+type LifecycleStatus = 'persisted' | 'standby' | 'active' | 'on-air'
+type EngineState = 'STOPPED' | 'READY' | 'RUNNING' | 'ERROR'
 
-1. **MOS 角色**：RCAS 是 **MOS Device**，quick-mos 扮演 NCS 的角色
-2. **连接模式**：后端监听 10540/10541/10542；lower port 主动连接 NCS；upper port 等待 NCS 连接
-3. **持久化格式**：`data/rundowns/_index.json`（索引）+ `data/rundowns/{roID}.json`（完整数据）
-4. **Profile 支持**：Profile 0 + 2 + 4，拒绝 1/3/5/6/7
-5. **部署形态**：当前 Monolith（单进程），预留 Microservice 扩展点
-6. **设计哲学**：参考 Sofie Core，声明式状态驱动，Blueprint 可热插拔
+interface RundownRuntime {
+    rundownId:     string
+    engineState:   EngineState
+    onAirPartId:   string | null
+    previewPartId: string | null
+    nextPartId:    string | null
+}
 
----
-
-## 八、开发环境
-```bash
-# 启动后端
-cd ~/rcas/packages/backend
-npm run dev
-
-# 启动 quick-mos（测试用 NCS）
-cd ~/rcas/.gcloudignore/reference/sofie-mos-connection/packages/quick-mos
-npm run start
-
-# Rundown 测试文件位置
-~/rcas/.gcloudignore/reference/sofie-mos-connection/packages/quick-mos/input/runningorders/
-
-# 持久化数据位置
-~/rcas/packages/backend/data/rundowns/
-
-# 验证脚本
-~/rcas/verify-profile2.mjs
+// core-lib/src/models/part-instance-model.ts
+interface IPartInstance {
+    instanceId: string
+    rundownId:  string
+    part:       IPart
+    startTime:  number
+    endTime?:   number
+    ended:      boolean
+    pieces:     IPiece[]
+    isPreview?: boolean
+}
 ```
 
 ---
 
-## 九、快速上手（新对话首要步骤）
+## 状态驱动完整链路
+```
+导播 TAKE / SEND TO PREVIEW
+  → SocketServer（intent 事件）
+  → RundownEngine（状态机）
+  → 创建 / 更新 PartInstance
+  → State Loop 心跳（100ms）
+  → buildTimeline(partInstances) → ITimelineObject[]   【纯函数】
+  → resolve(objects, now)        → DesiredState        【纯函数】
+  → diff(desired, lastSentState) → DeviceCommand[]     【纯函数】
+  → emit commandsReady
+  → TricasterDriver → tricasterClient.sendShortcut()
+  → Tricaster 设备
+```
 
-1. 读本文件（已完成）
-2. 如需了解某轮细节，读 `/mnt/transcripts/journal.txt` 找对应 transcript
-3. 如需了解架构全貌，读项目知识库中的 `ARCHITECTURE.md` 和 `README.md`
-4. 如需了解当前代码，重点看：
-   - `packages/backend/src/modules/1_mos_connection/mos-connection.ts`（回调注册）
-   - `packages/backend/src/modules/3_domain_engine/store/rundown-store.ts`（状态管理）
-   - `packages/core-lib/src/models/`（目标数据类型）
+---
+
+## 重要注意事项
+
+- **Zustand v5** 从 `zustand/react` 导入 `create`，不是从 `zustand`
+- **verbatimModuleSyntax**：类型 import 必须用 `import type`
+- **Blueprint 临时规则**：搜索 `// TODO: [BLUEPRINT]` 找到所有待补全位置
+- **Tricaster**：云端环境连接会 ETIMEDOUT，这是预期行为，换局域网环境后验证
+- **data/ 和 logs/** 已加入 .gitignore
+- **Firebase Studio**：前端由 dev.nix 自动启动，后端在项目根目录 `npm start`
+
+---
+
+## 下一步工作方向
+
+**最关键里程碑：换到有 Tricaster 的局域网环境**
+
+接通后立即实现：
+1. **Actual State 回路** — `change_notifications` → 更新 ActualState → Diff② 分叉检测
+2. **TAKING / TRANSITION 状态机** — TAKE 六步骤完整实现，含3秒收敛超时
+3. **前端状态分叉提示** — 橙色警告 + "重新接管"按钮
+
+不需要 Tricaster 也可以继续的：
+- 前端完整节目单树（Segment/Part 层级）
+- 设备状态指示灯
+- 键盘快捷键（Space=TAKE，Enter=PREVIEW，↑↓=SET NEXT）
+
+---
+
+## 第一件事
+
+读完本文档后，请告诉用户：
+"我已了解 RCAS 当前状态。后端状态驱动链路已完整实现并验证，前端 Step2 完成。请告诉我当前想继续哪个方向：前端节目单树、设备状态指示灯、还是等待 Tricaster 联网后接入 Actual State 回路？"

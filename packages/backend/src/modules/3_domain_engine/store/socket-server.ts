@@ -75,7 +75,19 @@ export class SocketServer {
 
             // 连接后立即推送全量摘要快照（含 persisted 的）
             const summaries = rundownStore.getAllSummaries();
+            // 连接后立即推送全量摘要快照
             socket.emit('snapshot', { summaries });
+
+            // 如果当前有 active/on-air 的 Rundown（runtime-snapshot 恢复的情况）
+            // 补推完整数据，前端才能渲染详细列表
+            const activeRundown = rundownStore.getActiveRundown();
+            if (activeRundown) {
+                const lifecycle = rundownStore.getLifecycle(activeRundown._id) ?? 'active';
+                socket.emit('rundown:activated', {
+                    id: activeRundown._id,
+                    rundown: activeRundown,
+                });
+            }
             logger.debug(`[SocketServer] Sent snapshot to ${clientID}: ${summaries.length} rundown(s)`);
 
             // 处理前端激活请求
