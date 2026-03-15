@@ -9,14 +9,12 @@
  */
 
 import { useEffect, useState } from 'react'
+import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
+//import { mockRundown, mockRuntime } from './mockRundown'
 import type { IRundown } from '../../core-lib/src/models/rundown-model'
-import type { ISegment } from '../../core-lib/src/models/segment-model'
 import type { IPart }    from '../../core-lib/src/models/part-model'
-import type { IPiece }   from '../../core-lib/src/models/piece-model'
-import type { RundownSummary, RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
-import { PartType }      from '../../core-lib/src/models/enums'
-
+import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
 const COLOR = {
@@ -33,37 +31,6 @@ const COLOR = {
     textDim: '#666',
 }
 
-// Part 类型标签
-const PART_TYPE_LABEL: Record<string, string> = {
-    [PartType.KAM]:      'CAM',
-    [PartType.SERVER]:   'VT',
-    [PartType.VO]:       'VO',
-    [PartType.LIVE]:     'LV',
-    [PartType.GRAPHICS]: 'GFX',
-    [PartType.UNKNOWN]:  '???',
-}
-
-const PART_TYPE_COLOR: Record<string, string> = {
-    [PartType.KAM]:      '#2980B9',
-    [PartType.SERVER]:   '#8E44AD',
-    [PartType.VO]:       '#16A085',
-    [PartType.LIVE]:     '#E67E22',
-    [PartType.GRAPHICS]: '#2C3E50',
-    [PartType.UNKNOWN]:  '#555',
-}
-
-// Piece 标签颜色（按类型名关键词匹配）
-function getPieceColor(name: string): string {
-    const n = name.toUpperCase()
-    if (n.includes('L3RD') || n.includes('LOWER'))  return '#8E44AD'  // 紫
-    if (n.includes('TRANS'))                         return '#E67E22'  // 橙
-    if (n.includes('BUG'))                           return '#2980B9'  // 蓝
-    if (n.includes('DSK'))                           return '#17A589'  // 青
-    if (n.includes('BRK') || n.includes('BREAK'))   return '#C0392B'  // 红
-    if (n.includes('SOT') || n.includes('VO'))      return '#27AE60'  // 绿
-    return '#555'
-}
-
 // 格式化毫秒为 M:SS
 function fmtMs(ms: number): string {
     if (!ms || ms <= 0) return '0:00'
@@ -71,11 +38,6 @@ function fmtMs(ms: number): string {
     const m = Math.floor(totalSec / 60)
     const s = totalSec % 60
     return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-// 格式化毫秒为 Back Time 字符串（总秒数的分秒）
-function fmtBackTime(ms: number): string {
-    return fmtMs(ms)
 }
 
 // 实时时钟 hook
@@ -106,7 +68,7 @@ function useElapsedMs(startedAt: number | null): number {
 export default function App() {
     const {
         connected, summaries, activeRundown, runtime,
-        activate, take, sendToPreview, setNext, _initSocket,
+        take, sendToPreview, setNext, _initSocket,
     } = useRCASStore()
 
     const clock = useClock()
@@ -147,7 +109,7 @@ export default function App() {
     const nextPart    = findPart(activeRundown, runtime?.nextPartId    ?? null)
 
     // 是否有活跃 Rundown 数据
-    const hasRundown = !!activeRundown
+
 
     return (
         <div style={{
@@ -196,9 +158,18 @@ export default function App() {
                     borderRight: `1px solid ${COLOR.border}`,
                     overflow:    'hidden',
                 }}>
+
+                    // 改回
+                    <RundownListView
+                        rundown={activeRundown!}
+                        runtime={runtime}
+                        onSetNext={connected ? setNext : () => {}}
+                        disabled={!connected}
+                    />
+
                     {hasRundown ? (
-                        <RundownList
-                            segments={activeRundown!.segments ?? []}
+                        <RundownListView
+                            rundown={activeRundown!}
                             runtime={runtime}
                             onSetNext={connected ? setNext : () => {}}
                             disabled={!connected}
@@ -354,7 +325,7 @@ function Header({ connected, rundownName, engineState, clock }: {
 
 // ─── Rundown 选择器（无 active rundown 时显示） ───────────────────────────────
 
-function RundownSelector({ summaries, onActivate, disabled }: {
+/* function RundownSelector({ summaries, onActivate, disabled }: {
     summaries:  RundownSummary[]
     onActivate: (id: string) => void
     disabled:   boolean
@@ -430,340 +401,7 @@ function RundownSelector({ summaries, onActivate, disabled }: {
             })}
         </div>
     )
-}
-
-// ─── Rundown 列表（有 active rundown 时显示） ─────────────────────────────────
-
-function RundownList({ segments, runtime, onSetNext, disabled }: {
-    segments:  ISegment[]
-    runtime:   RundownRuntime | null
-    onSetNext: (partId: string) => void
-    disabled:  boolean
-}) {
-    const onAirPartId   = runtime?.onAirPartId   ?? null
-    const previewPartId = runtime?.previewPartId ?? null
-    const nextPartId    = runtime?.nextPartId    ?? null
-
-    // 先遍历拿到所有 parts 的总时长（倒推 backtime）
-    const allParts: IPart[] = segments.flatMap(seg => seg.parts ?? [])
-    const totalMs = allParts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
-
-    // 底部汇总
-    const playedParts = allParts.filter(p => {
-        // 已播 = onAirPartId 之前的所有条目
-        if (!onAirPartId) return false
-        const onAirIdx = allParts.findIndex(x => x._id === onAirPartId)
-        const thisIdx  = allParts.findIndex(x => x._id === p._id)
-        return thisIdx < onAirIdx
-    })
-    const playedMs   = playedParts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
-    const remainingMs = totalMs - playedMs
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-
-            {/* 列头 */}
-            <div style={{
-                display:    'grid',
-                gridTemplateColumns: '36px 40px 1fr 52px 42px 52px 52px 28px',
-                gap:        0,
-                padding:    '0 8px',
-                height:     28,
-                alignItems: 'center',
-                background: '#0F0F0F',
-                borderBottom: `1px solid ${COLOR.border}`,
-                fontSize:   10,
-                fontWeight: 700,
-                color:      COLOR.textDim,
-                letterSpacing: '0.08em',
-                flexShrink: 0,
-            }}>
-                <span style={{ paddingLeft: 4 }}>PG</span>
-                <span>TYPE</span>
-                <span>SLUG / ELEMENTS</span>
-                <span style={{ textAlign: 'right' }}>DUR</span>
-                <span style={{ textAlign: 'right', color: '#555' }}>D</span>
-                <span style={{ textAlign: 'right' }}>BACK</span>
-                <span style={{ textAlign: 'right' }}>DBACK</span>
-                <span style={{ textAlign: 'center' }}>ST</span>
-            </div>
-
-            {/* 条目列表 */}
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-                {segments.map((seg, segIdx) => {
-                    const parts = seg.parts ?? []
-                    const isMultiPart = parts.length > 1
-
-                    return parts.map((part, partIdx) => {
-                        const isFirst    = partIdx === 0
-                        const isLast     = partIdx === parts.length - 1
-                        const isOnAir    = part._id === onAirPartId
-                        const isPreview  = part._id === previewPartId
-                        const isNext     = part._id === nextPartId
-
-                        // 背景色
-                        const rowBg =
-                            isOnAir   ? '#1E0505' :
-                            isPreview ? '#041508' :
-                            isNext    ? '#1A1200' :
-                            'transparent'
-
-                        const leftBarColor =
-                            isOnAir   ? COLOR.pgm  :
-                            isPreview ? COLOR.pvw  :
-                            isNext    ? COLOR.next :
-                            'transparent'
-
-                        // backtime 倒推（第一轮静态）
-                        const partIdx2 = allParts.findIndex(p => p._id === part._id)
-                        const backTimeMs = allParts
-                            .slice(partIdx2)
-                            .reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
-
-                        const stIcon =
-                            isOnAir   ? '▶' :
-                            isPreview ? '●' :
-                            isNext    ? '◆' :
-                            '○'
-
-                        const stColor =
-                            isOnAir   ? COLOR.pgm  :
-                            isPreview ? COLOR.pvw  :
-                            isNext    ? COLOR.next :
-                            COLOR.textDim
-
-                        const typeLabel = PART_TYPE_LABEL[part.type] ?? '???'
-                        const typeColor = PART_TYPE_COLOR[part.type] ?? '#555'
-                        const pieces    = part.pieces ?? []
-
-                        return (
-                            <div
-                                key={part._id}
-                                onClick={() => !disabled && !isOnAir && onSetNext(part._id)}
-                                style={{
-                                    display:        'grid',
-                                    gridTemplateColumns: '36px 40px 1fr 52px 42px 52px 52px 28px',
-                                    gap:            0,
-                                    padding:        '0 8px',
-                                    minHeight:      pieces.length > 0 ? 44 : 30,
-                                    alignItems:     'start',
-                                    paddingTop:     6,
-                                    paddingBottom:  6,
-                                    background:     rowBg,
-                                    borderBottom:   `1px solid ${COLOR.border}`,
-                                    borderLeft:     `3px solid ${leftBarColor}`,
-                                    cursor:         disabled || isOnAir ? 'default' : 'pointer',
-                                    transition:     'background 0.1s',
-                                    position:       'relative',
-                                }}
-                                onMouseEnter={e => {
-                                    if (!disabled && !isOnAir)
-                                        (e.currentTarget as HTMLDivElement).style.background =
-                                            isOnAir ? '#1E0505' : isPreview ? '#041508' : isNext ? '#1A1200' : '#1A1A1A'
-                                }}
-                                onMouseLeave={e => {
-                                    (e.currentTarget as HTMLDivElement).style.background = rowBg
-                                }}
-                            >
-                                {/* PG 列：只在第一个 Part 显示，多 Part 用分组线 */}
-                                <div style={{ paddingTop: 1, paddingLeft: 4 }}>
-                                    {isFirst && (
-                                        <span style={{
-                                            fontFamily: '"JetBrains Mono", monospace',
-                                            fontSize:   11,
-                                            color:      isOnAir ? COLOR.pgm : isPreview ? COLOR.pvw : isNext ? COLOR.next : COLOR.textDim,
-                                            fontWeight: isOnAir || isPreview || isNext ? 700 : 400,
-                                        }}>
-                                            {seg.name.split(/[\s\-]/)[0] || String(segIdx + 1).padStart(2, '0')}
-                                        </span>
-                                    )}
-                                    {!isFirst && isMultiPart && (
-                                        <span style={{ color: '#333', fontSize: 11, fontFamily: '"JetBrains Mono", monospace' }}>
-                                            {isLast ? '└' : '├'}
-                                        </span>
-                                    )}
-                                </div>
-
-                                {/* TYPE 列 */}
-                                <div style={{ paddingTop: 1 }}>
-                                    <span style={{
-                                        display:       'inline-block',
-                                        background:    typeColor,
-                                        color:         '#FFF',
-                                        fontSize:      9,
-                                        fontWeight:    700,
-                                        padding:       '1px 4px',
-                                        borderRadius:  2,
-                                        letterSpacing: '0.05em',
-                                    }}>
-                                        {typeLabel}
-                                    </span>
-                                </div>
-
-                                {/* SLUG + Piece 标签 */}
-                                <div style={{ overflow: 'hidden', paddingRight: 4 }}>
-                                    <div style={{
-                                        fontWeight:   isOnAir ? 700 : 500,
-                                        color:
-                                            isOnAir   ? '#FF6B6B' :
-                                            isPreview ? '#6BFF9E' :
-                                            isNext    ? '#FFD06B' :
-                                            COLOR.text,
-                                        overflow:     'hidden',
-                                        whiteSpace:   'nowrap',
-                                        textOverflow: 'ellipsis',
-                                        fontSize:     13,
-                                        lineHeight:   '1.3',
-                                    }}>
-                                        {part.title}
-                                    </div>
-                                    {/* Piece 标签行 */}
-                                    {pieces.length > 0 && (
-                                        <div style={{
-                                            display:    'flex',
-                                            flexWrap:   'wrap',
-                                            gap:        4,
-                                            marginTop:  4,
-                                        }}>
-                                            {pieces.slice(0, 6).map((piece, pi) => (
-                                                <PieceTag key={piece._id ?? pi} piece={piece} />
-                                            ))}
-                                            {pieces.length > 6 && (
-                                                <span style={{ color: COLOR.textDim, fontSize: 10 }}>
-                                                    +{pieces.length - 6}
-                                                </span>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* DUR 列 */}
-                                <div style={{
-                                    textAlign:  'right',
-                                    fontFamily: '"JetBrains Mono", monospace',
-                                    fontSize:   12,
-                                    color:      isOnAir ? COLOR.text : COLOR.textDim,
-                                    paddingTop: 1,
-                                }}>
-                                    {fmtMs(part.expectedDuration)}
-                                </div>
-
-                                {/* D (delta) 列 — 第一轮静态留空 */}
-                                <div style={{
-                                    textAlign:  'right',
-                                    fontFamily: '"JetBrains Mono", monospace',
-                                    fontSize:   11,
-                                    color:      '#444',
-                                    paddingTop: 1,
-                                }}>
-                                    —
-                                </div>
-
-                                {/* BACK 列 */}
-                                <div style={{
-                                    textAlign:  'right',
-                                    fontFamily: '"JetBrains Mono", monospace',
-                                    fontSize:   11,
-                                    color:      COLOR.textDim,
-                                    paddingTop: 1,
-                                }}>
-                                    {fmtBackTime(backTimeMs)}
-                                </div>
-
-                                {/* DBACK 列 — 第一轮同 BACK */}
-                                <div style={{
-                                    textAlign:  'right',
-                                    fontFamily: '"JetBrains Mono", monospace',
-                                    fontSize:   11,
-                                    color:      COLOR.textDim,
-                                    paddingTop: 1,
-                                }}>
-                                    {fmtBackTime(backTimeMs)}
-                                </div>
-
-                                {/* ST 列 */}
-                                <div style={{
-                                    textAlign:  'center',
-                                    fontFamily: '"JetBrains Mono", monospace',
-                                    fontSize:   12,
-                                    color:      stColor,
-                                    paddingTop: 1,
-                                }}>
-                                    {stIcon}
-                                </div>
-                            </div>
-                        )
-                    })
-                })}
-            </div>
-
-            {/* 底部汇总栏 */}
-            <div style={{
-                display:        'flex',
-                gap:            16,
-                padding:        '6px 12px',
-                background:     '#0A0A0A',
-                borderTop:      `1px solid ${COLOR.border}`,
-                fontSize:       11,
-                fontFamily:     '"JetBrains Mono", monospace',
-                color:          COLOR.textDim,
-                flexShrink:     0,
-                alignItems:     'center',
-            }}>
-                <span>总时长 <strong style={{ color: COLOR.text }}>{fmtMs(totalMs)}</strong></span>
-                <span style={{ color: COLOR.border }}>|</span>
-                <span>已播 <strong style={{ color: COLOR.pvw }}>{fmtMs(playedMs)}</strong></span>
-                <span style={{ color: COLOR.border }}>|</span>
-                <span>剩余 <strong style={{ color: COLOR.text }}>{fmtMs(remainingMs)}</strong></span>
-                <span style={{ color: COLOR.border }}>|</span>
-                <span>偏差 <strong style={{ color: COLOR.gray }}>—</strong></span>
-                <span style={{ color: COLOR.border }}>|</span>
-                <span>
-                    预计结束 <strong style={{ color: COLOR.pvw, fontSize: 12 }}>
-                        {totalMs > 0 ? new Date(Date.now() + remainingMs).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
-                    </strong>
-                </span>
-                <span style={{ marginLeft: 'auto', fontSize: 9, color: '#333' }}>[目标状态]</span>
-            </div>
-        </div>
-    )
-}
-
-// ─── Piece 标签 ───────────────────────────────────────────────────────────────
-
-function PieceTag({ piece }: { piece: IPiece }) {
-    const name  = (piece as any).name ?? (piece as any).title ?? (piece as any)._id ?? '?'
-    const color = getPieceColor(name)
-
-    return (
-        <div style={{
-            display:       'flex',
-            alignItems:    'center',
-            gap:           3,
-            background:    color + '22',
-            border:        `1px solid ${color}55`,
-            borderRadius:  2,
-            padding:       '1px 5px',
-            fontSize:      10,
-            color:         color,
-            fontWeight:    600,
-            letterSpacing: '0.04em',
-            maxWidth:      80,
-            overflow:      'hidden',
-            whiteSpace:    'nowrap',
-            textOverflow:  'ellipsis',
-        }}>
-            <div style={{
-                width:        4,
-                height:       4,
-                borderRadius: '50%',
-                background:   COLOR.gray,  // 第一轮静态：灰色（UNRESOLVED）
-                flexShrink:   0,
-            }}/>
-            {name.toString().toUpperCase().slice(0, 8)}
-        </div>
-    )
-}
+} */
 
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 

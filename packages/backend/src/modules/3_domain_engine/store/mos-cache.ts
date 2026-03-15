@@ -327,9 +327,67 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
     handleRunningOrderStory(story: IMOSROFullStory): void {
         const roID    = mosTypes.mosString128.stringify(story.RunningOrderId);
         const storyID = mosTypes.mosString128.stringify(story.ID);
-        logger.info(`[MosCache] Full story received: "${roID}"/"${storyID}", body: ${story.Body.length} items`);
+
+        logger.info(`[MosCache] roStorySend: "${roID}"/"${storyID}", body items: ${story.Body.length}`);
+
         const ro = this._rundowns.get(roID);
-        if (ro) this.emit('storyChanged', roID, 'fullStory', JSON.parse(JSON.stringify(ro)));
+        if (!ro) {
+            logger.warn(`[MosCache] roStorySend: RO "${roID}" not found in cache`);
+            return;
+        }
+
+        const cachedStory = ro.Stories.find(
+            s => mosTypes.mosString128.stringify(s.ID) === storyID
+        );
+        if (!cachedStory) {
+            logger.warn(`[MosCache] roStorySend: story "${storyID}" not found in RO "${roID}"`);
+            return;
+        }
+
+        // story.Body 包含完整的 storyItem 列表（含 MosObjects、路径、时长等）
+        // 遍历 Body，找到 storyItem 类型的条目，将其 MosObjects 合并进缓存的对应 Item
+        let mergedCount = 0;
+        for (const bodyItem of story.Body) {
+            if (bodyItem.itemType !== 'storyItem') continue;
+
+            const fullItem = bodyItem.Content;
+            const fullItemID = mosTypes.mosString128.stringify(fullItem.ID);
+
+            // 在缓存的 Story.Items 里找到对应的 Item
+            const cachedItem = cachedStory.Items.find(
+                i => mosTypes.mosString128.stringify(i.ID) === fullItemID
+            );
+
+            if (!cachedItem) {
+                // roStorySend 可能包含 roCreate 时还没有的新 Item，直接追加
+                logger.debug(`[MosCache] roStorySend: item "${fullItemID}" not in cache, appending`);
+                cachedStory.Items.push(fullItem);
+                mergedCount++;
+                continue;
+            }
+
+            // 将完整数据合并进缓存 Item（MosObjects 是最关键的，含路径和状态）
+            if (fullItem.MosObjects && fullItem.MosObjects.length > 0) {
+                cachedItem.MosObjects = fullItem.MosObjects;
+            }
+            // 同步其他可能更新的字段
+            if (fullItem.Paths && fullItem.Paths.length > 0) {
+                cachedItem.Paths = fullItem.Paths;
+            }
+            if (fullItem.EditorialDuration !== undefined) {
+                cachedItem.EditorialDuration = fullItem.EditorialDuration;
+            }
+            if (fullItem.UserTimingDuration !== undefined) {
+                cachedItem.UserTimingDuration = fullItem.UserTimingDuration;
+            }
+            if (fullItem.MosExternalMetaData && fullItem.MosExternalMetaData.length > 0) {
+                cachedItem.MosExternalMetaData = fullItem.MosExternalMetaData;
+            }
+            mergedCount++;
+        }
+
+        logger.info(`[MosCache] roStorySend merged ${mergedCount} item(s) into story "${storyID}"`);
+        this.emit('storyChanged', roID, 'fullStory', JSON.parse(JSON.stringify(ro)));
     }
 
     // ── 私有工具方法 ──────────────────────────────────────────────────────────
