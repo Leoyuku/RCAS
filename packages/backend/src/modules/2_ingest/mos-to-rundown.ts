@@ -86,17 +86,21 @@ function calcDuration(item: IMOSItem): number {
     const mosId = item.MOSID ?? '';
     if (mosId.toUpperCase() === 'STUDIO') return 0;
 
-    // 优先：UserTimingDuration（itemUserTimingDur）
-    if (item.UserTimingDuration && item.UserTimingDuration > 0) {
-        return item.UserTimingDuration;
+    // MOS 规范：所有时长字段单位均为 samples（采样数）
+    // 换算公式：ms = (samples / TimeBase) * 1000
+    // TimeBase 由 objTB 字段提供（NTSC=59.94, PAL=50）
+
+    if (item.UserTimingDuration && item.UserTimingDuration > 0 &&
+        item.TimeBase && item.TimeBase > 0) {
+        return Math.round((item.UserTimingDuration / item.TimeBase) * 1000);
     }
 
-    // 次选：EditorialDuration（itemEdDur）
-    if (item.EditorialDuration && item.EditorialDuration > 0) {
-        return item.EditorialDuration;
+    if (item.EditorialDuration && item.EditorialDuration > 0 &&
+        item.TimeBase && item.TimeBase > 0) {
+        return Math.round((item.EditorialDuration / item.TimeBase) * 1000);
     }
 
-    // 兜底：Duration（objDur）/ TimeBase（objTB）帧数换算
+    // Duration / TimeBase 兜底（来自 mosObj 的 objDur/objTB）
     if (item.Duration && item.TimeBase && item.TimeBase > 0) {
         return Math.round((item.Duration / item.TimeBase) * 1000);
     }
@@ -143,7 +147,8 @@ export function mosRunningOrderToRundown(ro: IMOSRunningOrder): IRundown {
 
 function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): ISegment {
     const externalId = mosTypes.mosString128.stringify(story.ID);
-    const parts      = story.Items.map((item, idx) => itemToPart(item, externalId, idx));
+    const storySlug  = story.Slug ? mosTypes.mosString128.stringify(story.Slug) : null;
+    const parts      = story.Items.map((item, idx) => itemToPart(item, externalId, idx, storySlug));
 
     return {
         _id:        externalId as any,
@@ -157,17 +162,13 @@ function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): IS
 
 // ─── Item → Part ─────────────────────────────────────────────────────────────
 
-function itemToPart(item: IMOSItem, segmentId: string, rank: number): IPart {
+function itemToPart(item: IMOSItem, segmentId: string, rank: number, storySlug: string | null): IPart {
     const externalId = mosTypes.mosString128.stringify(item.ID);
     const mosId      = item.MOSID ?? null;
     const partType   = mapMosIdToPartType(mosId);
     const duration   = calcDuration(item);
 
-    // title: itemSlug 优先，否则用 objectSlug，否则用 externalId
-    const title =
-        (item.Slug       ? mosTypes.mosString128.stringify(item.Slug)       : null) ??
-        (item.ObjectSlug ? mosTypes.mosString128.stringify(item.ObjectSlug) : null) ??
-        externalId;
+    const title = storySlug ?? externalId;
 
     // Pieces：从 MosObjects 生成（视频文件、音频等媒体资产）
     const pieces = buildPieces(item, externalId);

@@ -150,7 +150,7 @@ function buildFlatRows(rundown: IRundown): FlatRow[] {
       rows.push({
         part,
         segment:   seg,
-        pgLabel:   String(part.rank + 1).padStart(2, '0'),
+        pgLabel: String(rows.length + 1).padStart(2, '0'),
         backTimeMs: totalDuration - accumulated,
       })
       accumulated += part.expectedDuration ?? 0

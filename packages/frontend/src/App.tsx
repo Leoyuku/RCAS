@@ -4,25 +4,28 @@
  *
  * 布局规范（v3.0）：
  *   顶栏 48px — Logo | 连接状态 | Rundown名称 | ENGINE状态 | 时钟
- *   左侧 60% — Rundown 列表主体（纵向，Story分组，Piece标签行）
- *   右侧 40% — 操作区（PVW/PGM画面占位 | ON AIR状态+进度条 | TAKE/STP按钮）
+ *   左侧 60% — Rundown 列表主体
+ *   右侧 40% — 操作区（PVW/PGM监看占位 | ON AIR状态+进度条 | TAKE/STP按钮）
+ *
+ * ⚠️  Mock 数据已移除，恢复真实后端连接。
+ *     mockRundown.ts 文件保留，可供独立测试使用。
  */
 
 import { useEffect, useState } from 'react'
 import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
-//import { mockRundown, mockRuntime } from './mockRundown'
-import type { IRundown } from '../../core-lib/src/models/rundown-model'
-import type { IPart }    from '../../core-lib/src/models/part-model'
-import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+import type { IRundown }       from '../../core-lib/src/models/rundown-model'
+import type { IPart }          from '../../core-lib/src/models/part-model'
+import type { RundownSummary, RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
 const COLOR = {
-    pgm:     '#C0392B',  // ON AIR 红
-    pvw:     '#27AE60',  // PREVIEW 绿
-    next:    '#F39C12',  // NEXT 黄
-    gray:    '#7F8C8D',  // 未激活灰
-    blue:    '#0F3460',  // 操作蓝
+    pgm:     '#C0392B',
+    pvw:     '#27AE60',
+    next:    '#F39C12',
+    gray:    '#7F8C8D',
+    blue:    '#0F3460',
     bgDark:  '#0D0D0D',
     bgPanel: '#131313',
     bgRow:   '#1A1A1A',
@@ -50,7 +53,7 @@ function useClock() {
     return time.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-// ON AIR 进度条 hook（基于系统时钟，CAM 类型用）
+// ON AIR 进度条 hook
 function useElapsedMs(startedAt: number | null): number {
     const [elapsed, setElapsed] = useState(0)
     useEffect(() => {
@@ -63,26 +66,35 @@ function useElapsedMs(startedAt: number | null): number {
     return elapsed
 }
 
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
+
+function findPart(rundown: IRundown | null, partId: string | null): IPart | null {
+    if (!rundown || !partId) return null
+    for (const seg of rundown.segments ?? []) {
+        for (const part of seg.parts ?? []) {
+            if (part._id === partId) return part
+        }
+    }
+    return null
+}
+
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 
 export default function App() {
     const {
         connected, summaries, activeRundown, runtime,
-        take, sendToPreview, setNext, _initSocket,
+        activate, take, sendToPreview, setNext, _initSocket,
     } = useRCASStore()
 
     const clock = useClock()
 
-    // 键盘快捷键
     useEffect(() => {
         _initSocket()
     }, [])
 
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
-            // 忽略输入框内的按键
             if ((e.target as HTMLElement).tagName === 'INPUT') return
-
             if (e.code === 'Space') {
                 e.preventDefault()
                 take()
@@ -98,34 +110,33 @@ export default function App() {
         return () => window.removeEventListener('keydown', handler)
     }, [take, sendToPreview])
 
-    const engineState  = runtime?.engineState ?? 'STOPPED'
-    const isConnected  = connected
+    const engineState    = runtime?.engineState ?? 'STOPPED'
     const isDisconnected = !connected
-    const activeSum    = summaries.find(s => s.lifecycle === 'active' || s.lifecycle === 'on-air')
+    const activeSum      = summaries.find(s => s.lifecycle === 'active' || s.lifecycle === 'on-air')
 
-    // 找到当前 on-air / preview / next 的 Part
+    // 当前 on-air / preview / next 的 Part
     const onAirPart   = findPart(activeRundown, runtime?.onAirPartId   ?? null)
     const previewPart = findPart(activeRundown, runtime?.previewPartId ?? null)
     const nextPart    = findPart(activeRundown, runtime?.nextPartId    ?? null)
 
     // 是否有活跃 Rundown 数据
-
+    const hasRundown = activeRundown !== null
 
     return (
         <div style={{
-            display:         'flex',
-            flexDirection:   'column',
-            height:          '100vh',
-            background:      COLOR.bgDark,
-            color:           COLOR.text,
-            fontFamily:      '"IBM Plex Sans Condensed", "Noto Sans SC", sans-serif',
-            fontSize:        '13px',
-            overflow:        'hidden',
-            userSelect:      'none',
+            display:       'flex',
+            flexDirection: 'column',
+            height:        '100vh',
+            background:    COLOR.bgDark,
+            color:         COLOR.text,
+            fontFamily:    '"IBM Plex Sans Condensed", "Noto Sans SC", sans-serif',
+            fontSize:      '13px',
+            overflow:      'hidden',
+            userSelect:    'none',
         }}>
             {/* ── 顶栏 ── */}
             <Header
-                connected={isConnected}
+                connected={connected}
                 rundownName={activeSum?.name ?? activeRundown?.name ?? null}
                 engineState={engineState}
                 clock={clock}
@@ -152,21 +163,12 @@ export default function App() {
 
                 {/* 左栏：Rundown 列表 60% */}
                 <div style={{
-                    width:       '60%',
-                    display:     'flex',
+                    width:         '60%',
+                    display:       'flex',
                     flexDirection: 'column',
-                    borderRight: `1px solid ${COLOR.border}`,
-                    overflow:    'hidden',
+                    borderRight:   `1px solid ${COLOR.border}`,
+                    overflow:      'hidden',
                 }}>
-
-                    // 改回
-                    <RundownListView
-                        rundown={activeRundown!}
-                        runtime={runtime}
-                        onSetNext={connected ? setNext : () => {}}
-                        disabled={!connected}
-                    />
-
                     {hasRundown ? (
                         <RundownListView
                             rundown={activeRundown!}
@@ -216,13 +218,13 @@ export default function App() {
     )
 }
 
-// ─── 顶栏 ────────────────────────────────────────────────────────────────────
+// ─── 顶栏 ─────────────────────────────────────────────────────────────────────
 
 function Header({ connected, rundownName, engineState, clock }: {
-    connected:    boolean
-    rundownName:  string | null
-    engineState:  string
-    clock:        string
+    connected:   boolean
+    rundownName: string | null
+    engineState: string
+    clock:       string
 }) {
     const engineColor =
         engineState === 'RUNNING'    ? COLOR.pgm  :
@@ -234,14 +236,14 @@ function Header({ connected, rundownName, engineState, clock }: {
 
     return (
         <div style={{
-            height:         48,
-            minHeight:      48,
-            background:     '#0A0A0A',
-            borderBottom:   `1px solid ${COLOR.border}`,
-            display:        'flex',
-            alignItems:     'center',
-            padding:        '0 16px',
-            gap:            16,
+            height:       48,
+            minHeight:    48,
+            background:   '#0A0A0A',
+            borderBottom: `1px solid ${COLOR.border}`,
+            display:      'flex',
+            alignItems:   'center',
+            padding:      '0 16px',
+            gap:          16,
         }}>
             {/* Logo */}
             <div style={{
@@ -274,12 +276,12 @@ function Header({ connected, rundownName, engineState, clock }: {
 
             {/* Rundown 名称 */}
             <div style={{
-                flex:       1,
-                fontSize:   13,
-                fontWeight: 600,
-                color:      rundownName ? COLOR.text : COLOR.textDim,
-                overflow:   'hidden',
-                whiteSpace: 'nowrap',
+                flex:         1,
+                fontSize:     13,
+                fontWeight:   600,
+                color:        rundownName ? COLOR.text : COLOR.textDim,
+                overflow:     'hidden',
+                whiteSpace:   'nowrap',
                 textOverflow: 'ellipsis',
             }}>
                 {rundownName ?? '— 未选择节目单 —'}
@@ -287,34 +289,27 @@ function Header({ connected, rundownName, engineState, clock }: {
 
             {/* ENGINE 状态 */}
             <div style={{
-                display:    'flex',
-                alignItems: 'center',
-                gap:        6,
-                background: '#1A1A1A',
-                padding:    '3px 10px',
-                borderRadius: 3,
-                border:     `1px solid ${COLOR.border}`,
+                fontFamily:    '"JetBrains Mono", monospace',
+                fontSize:      10,
+                fontWeight:    700,
+                letterSpacing: '0.1em',
+                color:         engineColor,
+                background:    engineColor + '15',
+                border:        `1px solid ${engineColor}40`,
+                padding:       '3px 8px',
+                borderRadius:  2,
             }}>
-                <span style={{ color: COLOR.textDim, fontSize: 10, letterSpacing: '0.1em' }}>ENGINE</span>
-                <span style={{
-                    fontFamily:    '"JetBrains Mono", monospace',
-                    fontSize:      11,
-                    fontWeight:    600,
-                    color:         engineColor,
-                    letterSpacing: '0.05em',
-                }}>
-                    {engineState}
-                </span>
+                ENGINE {engineState}
             </div>
 
             {/* 时钟 */}
             <div style={{
                 fontFamily:    '"JetBrains Mono", monospace',
-                fontSize:      16,
-                fontWeight:    600,
+                fontSize:      20,
+                fontWeight:    300,
                 color:         COLOR.text,
-                letterSpacing: '0.05em',
-                minWidth:      72,
+                letterSpacing: '0.04em',
+                minWidth:      90,
                 textAlign:     'right',
             }}>
                 {clock}
@@ -323,85 +318,110 @@ function Header({ connected, rundownName, engineState, clock }: {
     )
 }
 
-// ─── Rundown 选择器（无 active rundown 时显示） ───────────────────────────────
+// ─── Rundown 选择器（无活跃 Rundown 时显示） ──────────────────────────────────
 
-/* function RundownSelector({ summaries, onActivate, disabled }: {
+function RundownSelector({ summaries, onActivate, disabled }: {
     summaries:  RundownSummary[]
     onActivate: (id: string) => void
     disabled:   boolean
 }) {
     const lc: Record<string, { label: string; color: string }> = {
-        'on-air':    { label: 'ON AIR',    color: COLOR.pgm  },
-        'active':    { label: 'ACTIVE',    color: COLOR.pvw  },
-        'standby':   { label: 'STANDBY',   color: COLOR.next },
-        'persisted': { label: 'PERSISTED', color: COLOR.gray },
+        'persisted': { label: 'PERSISTED', color: COLOR.gray  },
+        'standby':   { label: 'STANDBY',   color: COLOR.next  },
+        'active':    { label: 'ACTIVE',    color: COLOR.pvw   },
+        'on-air':    { label: 'ON AIR',    color: COLOR.pgm   },
     }
 
     return (
-        <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
+        <div style={{
+            flex:          1,
+            overflowY:     'auto',
+            padding:       '16px 0',
+        }}>
             <div style={{
-                padding:    '12px 16px 8px',
-                fontSize:   11,
-                fontWeight: 600,
-                color:      COLOR.textDim,
-                letterSpacing: '0.1em',
-                borderBottom: `1px solid ${COLOR.border}`,
-                background: '#0F0F0F',
+                fontFamily:    '"JetBrains Mono", monospace',
+                fontSize:      10,
+                fontWeight:    700,
+                letterSpacing: '0.12em',
+                color:         COLOR.textDim,
+                padding:       '0 16px 12px',
+                textTransform: 'uppercase',
             }}>
                 选择节目单
             </div>
+
             {summaries.length === 0 ? (
-                <div style={{ padding: '32px 16px', color: COLOR.textDim, textAlign: 'center', fontSize: 12 }}>
+                <div style={{
+                    padding:    '32px 16px',
+                    color:      COLOR.textDim,
+                    textAlign:  'center',
+                    fontSize:   12,
+                    fontFamily: '"JetBrains Mono", monospace',
+                }}>
                     等待 NCS 推送节目单…
                 </div>
-            ) : summaries.map(s => {
-                const { label, color } = lc[s.lifecycle] ?? { label: s.lifecycle, color: COLOR.gray }
-                return (
-                    <div
-                        key={s.id}
-                        onClick={() => !disabled && onActivate(s.id)}
-                        style={{
-                            display:      'flex',
-                            alignItems:   'center',
-                            gap:          12,
-                            padding:      '10px 16px',
-                            borderBottom: `1px solid ${COLOR.border}`,
-                            cursor:       disabled ? 'not-allowed' : 'pointer',
-                            opacity:      disabled ? 0.5 : 1,
-                            transition:   'background 0.1s',
-                        }}
-                        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLDivElement).style.background = '#1E1E1E' }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
-                    >
-                        <div style={{
-                            width:      3,
-                            height:     32,
-                            background: color,
-                            borderRadius: 2,
-                            flexShrink: 0,
-                        }}/>
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {s.name}
+            ) : (
+                summaries.map(s => {
+                    const { label, color } = lc[s.lifecycle] ?? { label: s.lifecycle, color: COLOR.gray }
+                    return (
+                        <div
+                            key={s.id}
+                            onClick={() => !disabled && onActivate(s.id)}
+                            style={{
+                                display:      'flex',
+                                alignItems:   'center',
+                                gap:          12,
+                                padding:      '10px 16px',
+                                borderBottom: `1px solid ${COLOR.border}`,
+                                cursor:       disabled ? 'not-allowed' : 'pointer',
+                                opacity:      disabled ? 0.5 : 1,
+                                transition:   'background 0.1s',
+                            }}
+                            onMouseEnter={e => {
+                                if (!disabled)
+                                    (e.currentTarget as HTMLDivElement).style.background = '#1E1E1E'
+                            }}
+                            onMouseLeave={e => {
+                                (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                            }}
+                        >
+                            <div style={{
+                                width:        3,
+                                height:       32,
+                                background:   color,
+                                borderRadius: 2,
+                                flexShrink:   0,
+                            }}/>
+                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                                <div style={{
+                                    fontWeight:   600,
+                                    fontSize:     13,
+                                    overflow:     'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace:   'nowrap',
+                                }}>
+                                    {s.name}
+                                </div>
+                                <div style={{ color: COLOR.textDim, fontSize: 11, marginTop: 2 }}>
+                                    {s.segmentCount} 个段落
+                                </div>
                             </div>
-                            <div style={{ color: COLOR.textDim, fontSize: 11, marginTop: 2 }}>
-                                {s.segmentCount} 个段落
+                            <div style={{
+                                fontSize:      10,
+                                fontWeight:    700,
+                                color,
+                                letterSpacing: '0.08em',
+                                fontFamily:    '"JetBrains Mono", monospace',
+                            }}>
+                                {label}
                             </div>
                         </div>
-                        <div style={{
-                            fontSize:      10,
-                            fontWeight:    700,
-                            color,
-                            letterSpacing: '0.08em',
-                        }}>
-                            {label}
-                        </div>
-                    </div>
-                )
-            })}
+                    )
+                })
+            )}
         </div>
     )
-} */
+}
 
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 
@@ -417,11 +437,8 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
     const engineState = runtime?.engineState ?? 'STOPPED'
     const canOperate  = connected && engineState !== 'STOPPED' && engineState !== 'ERROR'
 
-    // 进度条（基于系统时钟，等接入 Tricaster 后换成 DDR timecode）
-    // 第一轮：只在有 onAirPart 时启动计时
-    const onAirDur    = onAirPart?.expectedDuration ?? 0
-    // 使用 runtime 推送的时间戳（暂用 Date.now() 估算，第二轮换真实 startTime）
-    const elapsed     = useElapsedMs(runtime ? Date.now() - 30000 : null)  // 占位，第二轮接真实数据
+    const onAirDur = onAirPart?.expectedDuration ?? 0
+    const elapsed  = useElapsedMs(runtime && onAirPart ? Date.now() - 30000 : null)
 
     return (
         <div style={{
@@ -430,20 +447,17 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
             height:        '100%',
             overflow:      'hidden',
         }}>
-
             {/* ── 监看画面区（PVW 左 / PGM 右）── */}
             <div style={{
-                display:        'grid',
+                display:             'grid',
                 gridTemplateColumns: '1fr 1fr',
-                gap:            1,
-                background:     COLOR.border,
-                borderBottom:   `1px solid ${COLOR.border}`,
-                flexShrink:     0,
+                gap:                 1,
+                background:          COLOR.border,
+                borderBottom:        `1px solid ${COLOR.border}`,
+                flexShrink:          0,
             }}>
-                {/* PVW */}
                 <MonitorPlaceholder label="PVW" color={COLOR.pvw} part={previewPart} />
-                {/* PGM */}
-                <MonitorPlaceholder label="PGM" color={COLOR.pgm} part={onAirPart} />
+                <MonitorPlaceholder label="PGM" color={COLOR.pgm} part={onAirPart}   />
             </div>
 
             {/* ── ON AIR 状态 ── */}
@@ -456,7 +470,6 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                 duration={onAirDur}
             />
 
-            {/* 细分割线 */}
             <div style={{ height: 1, background: COLOR.border, flexShrink: 0 }}/>
 
             {/* ── PREVIEW 状态 ── */}
@@ -487,12 +500,13 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                         fontWeight:    700,
                         color:         COLOR.next,
                         letterSpacing: '0.1em',
+                        fontFamily:    '"JetBrains Mono", monospace',
                     }}>NEXT</span>
                     <span style={{
-                        fontSize:   12,
-                        color:      '#FFD06B',
-                        overflow:   'hidden',
-                        whiteSpace: 'nowrap',
+                        fontSize:     12,
+                        color:        '#FFD06B',
+                        overflow:     'hidden',
+                        whiteSpace:   'nowrap',
                         textOverflow: 'ellipsis',
                     }}>
                         {nextPart.title}
@@ -510,17 +524,17 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
 
             {/* ── 操作按钮区 ── */}
             <div style={{
-                padding:        '10px 12px 14px',
-                borderTop:      `1px solid ${COLOR.border}`,
-                display:        'flex',
-                flexDirection:  'column',
-                gap:            8,
-                flexShrink:     0,
-                background:     '#0C0C0C',
+                padding:       '10px 12px 14px',
+                borderTop:     `1px solid ${COLOR.border}`,
+                display:       'flex',
+                flexDirection: 'column',
+                gap:           8,
+                flexShrink:    0,
+                background:    '#0C0C0C',
             }}>
                 {/* SEND TO PREVIEW */}
                 <button
-                    onClick={canOperate && previewPart === null ? onSendToPreview : undefined}
+                    onClick={canOperate ? onSendToPreview : undefined}
                     disabled={!canOperate}
                     title="Enter"
                     style={{
@@ -531,17 +545,18 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                         color:         canOperate ? COLOR.pvw : COLOR.textDim,
                         fontSize:      12,
                         fontWeight:    700,
-                        letterSpacing: '0.1em',
+                        letterSpacing: '0.15em',
                         cursor:        canOperate ? 'pointer' : 'not-allowed',
+                        fontFamily:    '"JetBrains Mono", monospace',
                         transition:    'all 0.1s',
                         display:       'flex',
                         alignItems:    'center',
-                        justifyContent: 'center',
+                        justifyContent:'center',
                         gap:           8,
                     }}
                 >
                     SEND TO PREVIEW
-                    <span style={{ fontSize: 9, opacity: 0.5, fontFamily: '"JetBrains Mono", monospace' }}>Enter</span>
+                    <span style={{ fontSize: 9, opacity: 0.5 }}>Enter</span>
                 </button>
 
                 {/* TAKE */}
@@ -550,9 +565,9 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                     disabled={!canOperate}
                     title="Space"
                     style={{
-                        height:        56,
+                        height:        64,
                         background:    canOperate ? '#2D0000' : '#111',
-                        border:        `2px solid ${canOperate ? COLOR.pgm : COLOR.border}`,
+                        border:        `1px solid ${canOperate ? COLOR.pgm : COLOR.border}`,
                         borderRadius:  4,
                         color:         canOperate ? '#FFF' : COLOR.textDim,
                         fontSize:      20,
@@ -563,36 +578,38 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                         position:      'relative',
                         overflow:      'hidden',
                         boxShadow:     canOperate ? `0 0 16px ${COLOR.pgm}33` : 'none',
+                        fontFamily:    '"JetBrains Mono", monospace',
                     }}
                     onMouseEnter={e => {
                         if (canOperate) {
                             const b = e.currentTarget as HTMLButtonElement
-                            b.style.background  = '#3D0000'
-                            b.style.boxShadow   = `0 0 24px ${COLOR.pgm}55`
+                            b.style.background = '#3D0000'
+                            b.style.boxShadow  = `0 0 24px ${COLOR.pgm}55`
                         }
                     }}
                     onMouseLeave={e => {
                         if (canOperate) {
                             const b = e.currentTarget as HTMLButtonElement
-                            b.style.background  = '#2D0000'
-                            b.style.boxShadow   = `0 0 16px ${COLOR.pgm}33`
+                            b.style.background = '#2D0000'
+                            b.style.boxShadow  = `0 0 16px ${COLOR.pgm}33`
                         }
                     }}
                     onMouseDown={e => {
-                        if (canOperate) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.98)'
+                        if (canOperate)
+                            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.98)'
                     }}
                     onMouseUp={e => {
-                        if (canOperate) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'
+                        if (canOperate)
+                            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'
                     }}
                 >
                     TAKE
                     <span style={{
-                        position:   'absolute',
-                        bottom:     4,
-                        right:      10,
-                        fontSize:   9,
-                        opacity:    0.35,
-                        fontFamily: '"JetBrains Mono", monospace',
+                        position:      'absolute',
+                        bottom:        4,
+                        right:         10,
+                        fontSize:      9,
+                        opacity:       0.35,
                         letterSpacing: '0.05em',
                     }}>
                         SPACE
@@ -612,20 +629,20 @@ function MonitorPlaceholder({ label, color, part }: {
 }) {
     return (
         <div style={{
-            aspectRatio: '16/9',
-            background:  '#080808',
-            display:     'flex',
-            flexDirection: 'column',
-            alignItems:  'center',
+            aspectRatio:    '16/9',
+            background:     '#080808',
+            display:        'flex',
+            flexDirection:  'column',
+            alignItems:     'center',
             justifyContent: 'center',
-            position:    'relative',
-            overflow:    'hidden',
+            position:       'relative',
+            overflow:       'hidden',
         }}>
             {/* Tally 边框 */}
             <div style={{
-                position:   'absolute',
-                inset:      0,
-                border:     `2px solid ${part ? color : COLOR.border}`,
+                position:      'absolute',
+                inset:         0,
+                border:        `2px solid ${part ? color : COLOR.border}`,
                 pointerEvents: 'none',
             }}/>
             {/* 标签 */}
@@ -639,10 +656,11 @@ function MonitorPlaceholder({ label, color, part }: {
                 letterSpacing: '0.12em',
                 background:    '#000000AA',
                 padding:       '1px 4px',
+                fontFamily:    '"JetBrains Mono", monospace',
             }}>
                 {label}
             </div>
-            {/* 占位内容 */}
+            {/* 内容 */}
             <div style={{
                 fontSize:   11,
                 color:      COLOR.textDim,
@@ -650,7 +668,7 @@ function MonitorPlaceholder({ label, color, part }: {
                 lineHeight: 1.6,
             }}>
                 {part ? (
-                    <span style={{ color: part ? color : COLOR.textDim, fontWeight: 600 }}>
+                    <span style={{ color, fontWeight: 600 }}>
                         {part.title.slice(0, 20)}
                     </span>
                 ) : (
@@ -671,10 +689,9 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
     elapsed:      number
     duration:     number
 }) {
-    const progress   = duration > 0 ? Math.min(elapsed / duration, 1) : 0
-    const remaining  = Math.max(duration - elapsed, 0)
-
-    const barColor   =
+    const progress  = duration > 0 ? Math.min(elapsed / duration, 1) : 0
+    const remaining = Math.max(duration - elapsed, 0)
+    const barColor  =
         remaining > 30000 ? COLOR.pvw  :
         remaining > 10000 ? COLOR.next :
         COLOR.pgm
@@ -685,11 +702,10 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
             background: part ? color + '0D' : 'transparent',
             flexShrink: 0,
         }}>
-            {/* 标签行 */}
             <div style={{
-                display:    'flex',
-                alignItems: 'center',
-                gap:        8,
+                display:      'flex',
+                alignItems:   'center',
+                gap:          8,
                 marginBottom: part ? 6 : 0,
             }}>
                 <span style={{
@@ -700,18 +716,19 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
                     background:    part ? color + '22' : 'transparent',
                     padding:       '2px 6px',
                     borderRadius:  2,
+                    fontFamily:    '"JetBrains Mono", monospace',
                 }}>
                     {label}
                 </span>
                 {part && (
                     <span style={{
-                        fontSize:   13,
-                        fontWeight: 600,
-                        color:      color === COLOR.pgm ? '#FF8888' : '#88FF88',
-                        overflow:   'hidden',
-                        whiteSpace: 'nowrap',
+                        fontSize:     13,
+                        fontWeight:   600,
+                        color:        color === COLOR.pgm ? '#FF8888' : '#88FF88',
+                        overflow:     'hidden',
+                        whiteSpace:   'nowrap',
                         textOverflow: 'ellipsis',
-                        flex:       1,
+                        flex:         1,
                     }}>
                         {part.title}
                     </span>
@@ -721,7 +738,6 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
                 )}
             </div>
 
-            {/* 进度条 */}
             {showProgress && part && duration > 0 && (
                 <div>
                     <div style={{
@@ -741,11 +757,11 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
                         }}/>
                     </div>
                     <div style={{
-                        display:    'flex',
+                        display:        'flex',
                         justifyContent: 'space-between',
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize:   11,
-                        color:      COLOR.textDim,
+                        fontFamily:     '"JetBrains Mono", monospace',
+                        fontSize:       11,
+                        color:          COLOR.textDim,
                     }}>
                         <span>{fmtMs(elapsed)}</span>
                         <span style={{ color: barColor }}>{fmtMs(remaining)} 剩余</span>
@@ -755,16 +771,4 @@ function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
             )}
         </div>
     )
-}
-
-// ─── 工具函数 ─────────────────────────────────────────────────────────────────
-
-function findPart(rundown: IRundown | null, partId: string | null): IPart | null {
-    if (!rundown || !partId) return null
-    for (const seg of rundown.segments ?? []) {
-        for (const part of seg.parts ?? []) {
-            if (part._id === partId) return part
-        }
-    }
-    return null
 }
