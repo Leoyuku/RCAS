@@ -1,0 +1,675 @@
+/**
+ * @file RundownList.tsx
+ * @description RCAS Rundown 列表组件 — 广电播出控制系统核心 UI
+ *
+ * 设计规范：
+ *   - 完全扁平列表，无 Segment Header（与 Octopus 视觉对齐）
+ *   - 每个 IPart 独占一行（每个 Part 都是独立的 TAKE 目标）
+ *   - IPiece 以胶囊标签内联显示在所属 Part 行下方
+ *   - 状态颜色跟 Part 行走（PGM/PVW/NEXT）
+ *   - 底部汇总栏：总时长 | 已播 | 剩余 | 预计结束
+ *
+ * 列布局（8列）：
+ *   ST-ICON(28) | PG(44) | TYPE(44) | SLUG/ELEMENTS(1fr) | DUR(56) | D(40) | BACK(64) | ST(28)
+ *
+ * 用法（在 App.tsx 中）：
+ *   import RundownList from './RundownList'
+ *   ...
+ *   {activeRundown && (
+ *     <RundownList
+ *       rundown={activeRundown}
+ *       runtime={runtime}
+ *       disabled={!connected}
+ *       onSetNext={setNext}
+ *     />
+ *   )}
+ */
+
+import { useMemo, useRef, useEffect, forwardRef } from 'react'
+import type { IRundown }  from '../../core-lib/src/models/rundown-model'
+import type { ISegment }  from '../../core-lib/src/models/segment-model'
+import type { IPart }     from '../../core-lib/src/models/part-model'
+import type { IPiece }    from '../../core-lib/src/models/piece-model'
+import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+import { PartType }       from '../../core-lib/src/models/enums'
+
+// ─── 颜色系统（对齐 rcas-ui-v2.html CSS 变量） ───────────────────────────────
+
+const C = {
+  bgBase:       '#090b0e',
+  bgSurface:    '#0d1117',
+  bgRaised:     '#13181f',
+  border:       '#1e2530',
+  borderMid:    '#252d3a',
+  borderStrong: '#2d3848',
+  textPrimary:  '#dde4ee',
+  textSec:      '#6a7d92',
+  textDim:      '#333f4e',
+
+  // ON AIR — 红
+  pgmBg:     '#2a0806',
+  pgmBorder: '#c0392b',
+  pgmText:   '#ff8070',
+  pgmLabel:  '#e74c3c',
+  pgmFade:   'rgba(192,57,43,.55)',
+
+  // PREVIEW — 绿
+  pvwBg:     '#051a0a',
+  pvwBorder: '#1e8449',
+  pvwText:   '#6ee89a',
+  pvwLabel:  '#27ae60',
+  pvwFade:   'rgba(30,132,73,.55)',
+
+  // NEXT — 琥珀
+  nxtBg:     '#140f00',
+  nxtBorder: '#8a6a00',
+  nxtText:   '#e0b830',
+  nxtFade:   'rgba(138,106,0,.55)',
+
+  mono: '"IBM Plex Mono", "JetBrains Mono", monospace',
+  sans: '"IBM Plex Sans Condensed", "Helvetica Neue", sans-serif',
+}
+
+// ─── Part 类型 ───────────────────────────────────────────────────────────────
+
+const PART_TYPE_LABEL: Record<string, string> = {
+  [PartType.KAM]:      'CAM',
+  [PartType.SERVER]:   'VT',
+  [PartType.VO]:       'VO',
+  [PartType.LIVE]:     'LV',
+  [PartType.GRAPHICS]: 'GFX',
+  [PartType.UNKNOWN]:  '???',
+}
+
+const PART_TYPE_STYLE: Record<string, { color: string; bg: string; border: string }> = {
+  [PartType.KAM]:      { color: '#6baaf5', bg: 'rgba(37,99,235,.14)',  border: 'rgba(37,99,235,.22)' },
+  [PartType.SERVER]:   { color: '#b09af0', bg: 'rgba(124,58,237,.14)', border: 'rgba(124,58,237,.22)' },
+  [PartType.VO]:       { color: '#5ec48a', bg: 'rgba(5,150,105,.14)',  border: 'rgba(5,150,105,.22)' },
+  [PartType.LIVE]:     { color: '#f87171', bg: 'rgba(220,38,38,.14)',  border: 'rgba(220,38,38,.22)' },
+  [PartType.GRAPHICS]: { color: '#f5b944', bg: 'rgba(217,119,6,.14)',  border: 'rgba(217,119,6,.22)' },
+  [PartType.UNKNOWN]:  { color: '#6a7d92', bg: 'rgba(106,125,146,.1)', border: 'rgba(106,125,146,.2)' },
+}
+
+// ─── Piece 标签样式 ───────────────────────────────────────────────────────────
+
+interface PieceStyle { color: string; bg: string; border: string }
+
+function getPieceStyle(name: string): PieceStyle {
+  const n = name.toUpperCase()
+  if (n.includes('L3RD') || n.includes('LOWER'))
+    return { color: '#9b7de8', bg: 'rgba(155,125,232,.07)', border: 'rgba(155,125,232,.25)' }
+  if (n.includes('TRANS') || n.includes('STING'))
+    return { color: '#e8a030', bg: 'rgba(232,160,48,.07)',  border: 'rgba(232,160,48,.25)' }
+  if (n.includes('BUG') || n.includes('LOGO'))
+    return { color: '#5b9ed4', bg: 'rgba(91,158,212,.07)',  border: 'rgba(91,158,212,.25)' }
+  if (n.includes('DSK'))
+    return { color: '#4abcb0', bg: 'rgba(74,188,176,.07)',  border: 'rgba(74,188,176,.25)' }
+  if (n.includes('BRK') || n.includes('BREAK'))
+    return { color: '#e84040', bg: 'rgba(232,64,64,.08)',   border: 'rgba(232,64,64,.3)' }
+  if (n.includes('SOT'))
+    return { color: '#c4a87e', bg: 'rgba(196,168,126,.07)', border: 'rgba(196,168,126,.25)' }
+  if (n.includes('VO'))
+    return { color: '#7ec47e', bg: 'rgba(126,196,126,.07)', border: 'rgba(126,196,126,.25)' }
+  return   { color: '#6a7d92', bg: 'rgba(106,125,146,.07)', border: 'rgba(106,125,146,.2)' }
+}
+
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
+
+function fmtMs(ms: number): string {
+  if (!ms || ms <= 0) return '—'
+  const totalSec = Math.floor(ms / 1000)
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function fmtTimeOfDay(ms: number): string {
+  const d = new Date(ms)
+  return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+}
+
+// ─── 扁平化行数据结构 ─────────────────────────────────────────────────────────
+
+interface FlatRow {
+  part:             IPart
+  segment:          ISegment
+  pgLabel:          string
+  pgIndex:          number    // Segment 在 Rundown 中的序号（0-based）
+  isFirstInSegment: boolean   // 是否是 Segment 内第一个 Part
+  backTimeMs:       number
+}
+
+function buildFlatRows(rundown: IRundown): FlatRow[] {
+  const segments = rundown.segments ?? []
+  const rows: FlatRow[] = []
+
+  const allParts = segments.flatMap(seg => seg.parts ?? [])
+  const totalDuration = allParts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
+  let accumulated = 0
+
+  for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+    const seg = segments[segIdx]
+    const parts = seg.parts ?? []
+    for (let partIdx = 0; partIdx < parts.length; partIdx++) {
+      const part = parts[partIdx]
+      rows.push({
+        part,
+        segment:          seg,
+        pgLabel:          String(segIdx + 1).padStart(2, '0'),
+        pgIndex:          segIdx,
+        isFirstInSegment: partIdx === 0,
+        backTimeMs:       totalDuration - accumulated,
+      })
+      accumulated += part.expectedDuration ?? 0
+    }
+  }
+
+  return rows
+}
+
+// ─── 全局动画注入 ─────────────────────────────────────────────────────────────
+
+function injectAnimations() {
+  if (typeof document === 'undefined') return
+  if (document.getElementById('rcas-rl-anim')) return
+  const style = document.createElement('style')
+  style.id = 'rcas-rl-anim'
+  style.textContent = `
+    @keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    @keyframes rcas-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  `
+  document.head.appendChild(style)
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+export interface RundownListProps {
+  rundown:   IRundown
+  runtime:   RundownRuntime | null
+  disabled:  boolean
+  onSetNext: (partId: string) => void
+}
+
+// ─── 主组件 ───────────────────────────────────────────────────────────────────
+
+export default function RundownListView({ rundown, runtime, disabled, onSetNext }: RundownListProps) {
+  injectAnimations()
+
+  const rows = useMemo(() => buildFlatRows(rundown), [rundown])
+  const onAirRef = useRef<HTMLDivElement | null>(null)
+
+  // ON AIR 行自动滚入视口
+  useEffect(() => {
+    if (onAirRef.current) {
+      onAirRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [runtime?.onAirPartId])
+
+  // 汇总统计（memoized）
+  const stats = useMemo(() => {
+    const allParts  = rows.map(r => r.part)
+    const totalMs   = allParts.reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+    const onAirIdx  = runtime?.onAirPartId
+      ? allParts.findIndex(p => (p._id as string) === runtime.onAirPartId)
+      : -1
+    const playedMs  = onAirIdx >= 0
+      ? allParts.slice(0, onAirIdx).reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+      : 0
+    const remainMs  = totalMs - playedMs
+    const expectedEnd = Date.now() + remainMs
+    return { totalMs, playedMs, remainMs, expectedEnd }
+  }, [rows, runtime?.onAirPartId])
+
+  return (
+    <div style={{
+      display:       'flex',
+      flexDirection: 'column',
+      height:        '100%',
+      overflow:      'hidden',
+      background:    C.bgBase,
+    }}>
+      {/* 列头 */}
+      <ColumnHeader />
+
+      {/* 滚动列表区 */}
+      <div style={{
+        flex:           1,
+        overflowY:      'auto',
+        scrollbarWidth: 'thin',
+        scrollbarColor: `${C.borderStrong} transparent`,
+      }}>
+        {rows.length === 0
+          ? <EmptyState />
+          : rows.map((row, idx) => {
+              const isOnAir   = (row.part._id as string) === runtime?.onAirPartId
+              const isPreview = (row.part._id as string) === runtime?.previewPartId
+              const isNext    = (row.part._id as string) === runtime?.nextPartId
+
+              // 已播：ON AIR 行之前的所有行
+              const onAirIdx = rows.findIndex(r => (r.part._id as string) === runtime?.onAirPartId)
+              const isPlayed  = onAirIdx >= 0 && idx < onAirIdx
+
+              return (
+                <PartRow
+                  key={row.part._id as string}
+                  row={row}
+                  isOnAir={isOnAir}
+                  isPreview={isPreview}
+                  isNext={isNext}
+                  isPlayed={isPlayed}
+                  disabled={disabled}
+                  onSetNext={onSetNext}
+                  ref={isOnAir ? onAirRef : null}
+                />
+              )
+            })
+        }
+      </div>
+
+      {/* 底部汇总栏 */}
+      <TotalBar stats={stats} />
+    </div>
+  )
+}
+
+// ─── 列头 ─────────────────────────────────────────────────────────────────────
+
+function ColumnHeader() {
+  const col = (align: 'left' | 'right' = 'left', label = '') => (
+    <div style={{
+      fontFamily:    C.mono,
+      fontSize:      9,
+      fontWeight:    700,
+      letterSpacing: '0.12em',
+      color:         C.textDim,
+      textTransform: 'uppercase',
+      textAlign:     align,
+    }}>
+      {label}
+    </div>
+  )
+
+  return (
+    <div style={{
+      display:             'grid',
+      gridTemplateColumns: '28px 44px 44px 1fr 56px 40px 64px 28px',
+      padding:             '0 8px',
+      height:              26,
+      alignItems:          'center',
+      background:          C.bgSurface,
+      borderBottom:        `1px solid ${C.borderStrong}`,
+      flexShrink:          0,
+    }}>
+      {col()}
+      {col('left',  'PG')}
+      {col('left',  'TYPE')}
+      {col('left',  'SLUG / ELEMENTS')}
+      {col('right', 'DUR')}
+      {col('right', 'D')}
+      {col('right', 'BACK')}
+      {col('right', 'ST')}
+    </div>
+  )
+}
+
+// ─── Part 行 ──────────────────────────────────────────────────────────────────
+
+interface PartRowProps {
+  row:       FlatRow
+  isOnAir:   boolean
+  isPreview: boolean
+  isNext:    boolean
+  isPlayed:  boolean
+  disabled:  boolean
+  onSetNext: (partId: string) => void
+}
+
+const PartRow = forwardRef<HTMLDivElement, PartRowProps>(
+  ({ row, isOnAir, isPreview, isNext, isPlayed, disabled, onSetNext }, ref) => {
+    const { part, pgLabel, isFirstInSegment } = row
+    const pieces = part.pieces ?? []
+    const hasPieces = pieces.length > 0
+
+    // 行颜色映射
+    const rowBg       = isOnAir ? C.pgmBg : isPreview ? C.pvwBg : isNext ? C.nxtBg : 'transparent'
+    const leftBorder  = isOnAir ? C.pgmBorder : isPreview ? C.pvwBorder : isNext ? C.nxtBorder : 'transparent'
+    const slugColor   = isOnAir ? C.pgmText : isPreview ? C.pvwText : isNext ? C.nxtText : C.textPrimary
+    const durColor    = isOnAir ? '#ff6b5b' : isPreview ? '#52c47a' : isNext ? C.nxtText : C.textSec
+    const pgColor     = isOnAir ? C.pgmFade : isPreview ? C.pvwFade : isNext ? C.nxtFade : C.textDim
+    const backColor   = isOnAir ? 'rgba(255,107,91,.4)' : isPreview ? 'rgba(82,196,122,.35)' : isNext ? 'rgba(200,154,0,.35)' : C.textDim
+
+    const rowBorderBottom = isOnAir
+      ? 'rgba(192,57,43,.2)'
+      : isPreview ? 'rgba(30,132,73,.15)'
+      : isNext    ? 'rgba(138,106,0,.15)'
+      : 'rgba(30,37,48,.7)'
+
+    const canClick = !disabled && !isOnAir
+    const typeStyle = PART_TYPE_STYLE[part.type] ?? PART_TYPE_STYLE[PartType.UNKNOWN]
+    const typeLabel = PART_TYPE_LABEL[part.type] ?? '???'
+
+    // 内容行高度（数字列对齐用）
+    const cellHeight = hasPieces ? 22 : 28
+
+    return (
+      <div
+        ref={ref}
+        onClick={() => canClick && onSetNext(part._id as string)}
+        style={{
+          display:             'grid',
+          gridTemplateColumns: '28px 44px 44px 1fr 56px 40px 64px 28px',
+          padding:             `${hasPieces ? 7 : 0}px 8px`,
+          alignItems:          'start',
+          background:          rowBg,
+          borderLeft:          `3px solid ${leftBorder}`,
+          borderBottom:        `1px solid ${rowBorderBottom}`,
+          cursor:              canClick ? 'pointer' : 'default',
+          opacity:             isPlayed ? 0.28 : 1,
+          transition:          'background 0.08s',
+          minHeight:           hasPieces ? 42 : 28,
+        }}
+        onMouseEnter={e => {
+          if (canClick && !isOnAir && !isPreview && !isNext && !isPlayed)
+            (e.currentTarget as HTMLDivElement).style.background = C.bgRaised
+        }}
+        onMouseLeave={e => {
+          if (!isOnAir && !isPreview && !isNext)
+            (e.currentTarget as HTMLDivElement).style.background = rowBg
+        }}
+      >
+        {/* ST 图标 */}
+        <Cell height={cellHeight} justify="center">
+          <StateIcon isOnAir={isOnAir} isPreview={isPreview} isNext={isNext} isPlayed={isPlayed} />
+        </Cell>
+
+        {/* PG — 同 Segment 多行：第一行正常显示，后续行极淡 + 左侧虚线 */}
+<Cell height={cellHeight}>
+  {isFirstInSegment ? (
+    <span style={{ fontFamily: C.mono, fontSize: 11, color: pgColor }}>
+      {pgLabel}
+    </span>
+  ) : (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', height: '100%' }}>
+      {/* 左侧细虚线 */}
+      <div style={{
+        position:    'absolute',
+        left:        6,
+        top:         0,
+        bottom:      0,
+        width:       1,
+        borderLeft:  `1px dashed ${C.borderMid}`,
+      }} />
+      {/* 极淡的 PG 号 */}
+      <span style={{
+        fontFamily: C.mono,
+        fontSize:   11,
+        color:      C.textDim,
+        opacity:    0.4,
+        paddingLeft: 14,
+      }}>
+        {pgLabel}
+      </span>
+    </div>
+  )}
+</Cell>
+
+        {/* TYPE */}
+        <Cell height={cellHeight}>
+          <div style={{
+            width:          32,
+            height:         17,
+            borderRadius:   2,
+            display:        'flex',
+            alignItems:     'center',
+            justifyContent: 'center',
+            fontFamily:     C.mono,
+            fontSize:       8,
+            fontWeight:     700,
+            letterSpacing:  '0.04em',
+            textTransform:  'uppercase',
+            color:          typeStyle.color,
+            background:     typeStyle.bg,
+            border:         `1px solid ${typeStyle.border}`,
+          }}>
+            {typeLabel}
+          </div>
+        </Cell>
+
+        {/* SLUG + PIECES */}
+        <div style={{
+          display:        'flex',
+          flexDirection:  'column',
+          justifyContent: 'center',
+          padding:        '0 8px 0 0',
+          gap:            4,
+          minWidth:       0,
+          alignSelf:      'center',
+        }}>
+          <div style={{
+            fontFamily:   C.sans,
+            fontSize:     12,
+            fontWeight:   isOnAir ? 700 : isPreview ? 600 : 500,
+            color:        isPlayed ? C.textSec : slugColor,
+            whiteSpace:   'nowrap',
+            overflow:     'hidden',
+            textOverflow: 'ellipsis',
+            lineHeight:   '1.3',
+          }}>
+            {part.title || part.externalId}
+          </div>
+          {hasPieces && <PieceTags pieces={pieces} />}
+        </div>
+
+        {/* DUR */}
+        <Cell height={cellHeight} justify="flex-end">
+          <span style={{ fontFamily: C.mono, fontSize: 11, color: durColor }}>
+            {fmtMs(part.expectedDuration)}
+          </span>
+        </Cell>
+
+        {/* D（实际时长，待 takeConfirmedAt 数据） */}
+        <Cell height={cellHeight} justify="flex-end">
+          <span style={{ fontFamily: C.mono, fontSize: 11, color: C.textDim }}>—</span>
+        </Cell>
+
+        {/* BACK */}
+        <Cell height={cellHeight} justify="flex-end">
+          <span style={{ fontFamily: C.mono, fontSize: 11, color: backColor }}>
+            {fmtMs(row.backTimeMs)}
+          </span>
+        </Cell>
+
+        {/* ST 状态点 */}
+        <Cell height={cellHeight} justify="center">
+          <div style={{
+            width:        5,
+            height:       5,
+            borderRadius: '50%',
+            background:   C.borderStrong,
+          }} />
+        </Cell>
+      </div>
+    )
+  }
+)
+
+// ─── 辅助：对齐用 Cell 容器 ───────────────────────────────────────────────────
+
+function Cell({
+  children,
+  height,
+  justify = 'flex-start',
+}: {
+  children: React.ReactNode
+  height: number
+  justify?: string
+}) {
+  return (
+    <div style={{
+      display:        'flex',
+      alignItems:     'center',
+      justifyContent: justify,
+      height,
+    }}>
+      {children}
+    </div>
+  )
+}
+
+// ─── 状态图标 ─────────────────────────────────────────────────────────────────
+
+function StateIcon({ isOnAir, isPreview, isNext, isPlayed }: {
+  isOnAir: boolean; isPreview: boolean; isNext: boolean; isPlayed: boolean
+}) {
+  if (isOnAir)
+    return <span style={{ fontFamily: C.mono, fontSize: 9, color: C.pgmLabel, fontWeight: 700 }}>▶</span>
+  if (isPreview)
+    return <span style={{ fontFamily: C.mono, fontSize: 9, color: C.pvwLabel, fontWeight: 700 }}>●</span>
+  if (isNext)
+    return <span style={{ fontFamily: C.mono, fontSize: 8, color: C.nxtBorder }}>◆</span>
+  return (
+    <div style={{
+      width:        5,
+      height:       5,
+      borderRadius: '50%',
+      border:       `1px solid ${isPlayed ? C.borderStrong : C.borderMid}`,
+    }} />
+  )
+}
+
+// ─── ON AIR 闪烁指示 ─────────────────────────────────────────────────────────
+
+/* function AirBlink() {
+  return (
+    <div style={{
+      width:        7,
+      height:       7,
+      borderRadius: '50%',
+      background:   C.pgmLabel,
+      animation:    'rcas-blink 1s step-end infinite',
+    }} />
+  )
+} */
+
+// ─── Piece 胶囊标签行 ─────────────────────────────────────────────────────────
+
+function PieceTags({ pieces }: { pieces: IPiece[] }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+      {pieces.map((piece, idx) => {
+        const ps = getPieceStyle(piece.name || piece.externalId)
+        const label = piece.name || piece.externalId
+        return (
+          <span
+            key={(piece._id as string) ?? idx}
+            style={{
+              display:       'flex',
+              alignItems:    'center',
+              gap:           3,
+              fontFamily:    C.mono,
+              fontSize:      8,
+              fontWeight:    600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              padding:       '1px 5px',
+              borderRadius:  2,
+              border:        `1px solid ${ps.border}`,
+              background:    ps.bg,
+              color:         ps.color,
+              whiteSpace:    'nowrap',
+            }}
+          >
+            {/* 状态点：第一轮灰色，等待后端 PieceInstance */}
+            <div style={{
+              width:        4,
+              height:       4,
+              borderRadius: '50%',
+              background:   C.borderStrong,
+              flexShrink:   0,
+            }} />
+            {label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── 空状态 ───────────────────────────────────────────────────────────────────
+
+function EmptyState() {
+  return (
+    <div style={{
+      display:        'flex',
+      alignItems:     'center',
+      justifyContent: 'center',
+      height:         200,
+      fontFamily:     C.mono,
+      fontSize:       11,
+      color:          C.textDim,
+      letterSpacing:  '0.12em',
+      textTransform:  'uppercase',
+    }}>
+      No Rundown Data
+    </div>
+  )
+}
+
+// ─── 底部汇总栏 ───────────────────────────────────────────────────────────────
+
+interface TotalBarStats {
+  totalMs: number; playedMs: number; remainMs: number; expectedEnd: number
+}
+
+function TotalBar({ stats }: { stats: TotalBarStats }) {
+  const items = [
+    { lbl: 'TOTAL',  val: fmtMs(stats.totalMs),  color: C.textSec },
+    { lbl: 'PLAYED', val: fmtMs(stats.playedMs), color: C.textSec },
+    {
+      lbl: 'REM',
+      val: fmtMs(stats.remainMs),
+      color: stats.remainMs > 0 && stats.remainMs < 120_000 ? '#e74c3c' : C.pvwLabel,
+    },
+    { lbl: 'ETA', val: stats.remainMs > 0 ? fmtTimeOfDay(stats.expectedEnd) : '—', color: C.textSec },
+  ]
+
+  return (
+    <div style={{
+      height:     26,
+      borderTop:  `1px solid ${C.borderStrong}`,
+      display:    'flex',
+      alignItems: 'center',
+      padding:    '0 10px',
+      background: C.bgSurface,
+      flexShrink: 0,
+      gap:        0,
+    }}>
+      {items.map((item, i) => (
+        <div key={item.lbl} style={{ display: 'flex', alignItems: 'center' }}>
+          {i > 0 && (
+            <div style={{ width: 1, height: 12, background: C.borderMid, margin: '0 10px' }} />
+          )}
+          <span style={{
+            fontFamily:    C.mono,
+            fontSize:      8,
+            fontWeight:    700,
+            letterSpacing: '0.1em',
+            color:         C.textDim,
+            textTransform: 'uppercase',
+            marginRight:   5,
+          }}>
+            {item.lbl}
+          </span>
+          <span style={{
+            fontFamily: C.mono,
+            fontSize:   11,
+            fontWeight: 500,
+            color:      item.color,
+          }}>
+            {item.val}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}

@@ -109,15 +109,16 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         }
 
         // 计算新的 next（当前 onAir 之后的下一个）
-        const parts      = this._getAllParts(rundownId);
-        const takeIndex  = parts.findIndex(p => p._id === takePartId);
-        const newNextId  = parts[takeIndex + 1]?._id ?? null;
+        const parts        = this._getAllParts(rundownId);
+        const takeIndex    = parts.findIndex(p => p._id === takePartId);
+        const newPreviewId = parts[takeIndex + 1]?._id ?? null;
+        const newNextId    = parts[takeIndex + 2]?._id ?? null;
 
         this._setRuntime({
             ...this._runtime,
-            engineState:   newNextId ? 'RUNNING' : 'RUNNING',
+            engineState:   'RUNNING',
             onAirPartId:   takePartId,
-            previewPartId: null,
+            previewPartId: newPreviewId,
             nextPartId:    newNextId,
         });
 

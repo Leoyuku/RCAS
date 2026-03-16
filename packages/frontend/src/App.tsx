@@ -16,7 +16,7 @@ import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
 import type { IRundown }       from '../../core-lib/src/models/rundown-model'
 import type { IPart }          from '../../core-lib/src/models/part-model'
-import type { RundownSummary, RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
@@ -87,6 +87,8 @@ export default function App() {
     } = useRCASStore()
 
     const clock = useClock()
+    const [showRundownPanel, setShowRundownPanel] = useState(false)
+    const [selectedId, setSelectedId]             = useState<string | null>(null)
 
     useEffect(() => {
         _initSocket()
@@ -104,6 +106,9 @@ export default function App() {
             } else if (e.code === 'F11') {
                 e.preventDefault()
                 document.documentElement.requestFullscreen?.()
+            } else if (e.code === 'Escape') {
+                setShowRundownPanel(false)
+                setSelectedId(null)
             }
         }
         window.addEventListener('keydown', handler)
@@ -140,7 +145,146 @@ export default function App() {
                 rundownName={activeSum?.name ?? activeRundown?.name ?? null}
                 engineState={engineState}
                 clock={clock}
+                onOpenRundown={() => setShowRundownPanel(true)}
             />
+
+            {/* ── Rundown 选择面板 ── */}
+            {showRundownPanel && (
+                <div
+                    style={{
+                        position:   'fixed',
+                        inset:      0,
+                        zIndex:     100,
+                    }}
+                    onClick={() => { setShowRundownPanel(false); setSelectedId(null) }}
+                >
+                    <div
+                        style={{
+                            position:   'absolute',
+                            top:        48,
+                            left:       160,
+                            width:      420,
+                            background: '#111',
+                            border:     `1px solid ${COLOR.border}`,
+                            borderRadius: 4,
+                            boxShadow:  '0 8px 32px rgba(0,0,0,0.6)',
+                            overflow:   'hidden',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* 面板标题 */}
+                        <div style={{
+                            padding:       '10px 16px',
+                            borderBottom:  `1px solid ${COLOR.border}`,
+                            fontFamily:    '"JetBrains Mono", monospace',
+                            fontSize:      10,
+                            fontWeight:    700,
+                            letterSpacing: '0.12em',
+                            color:         COLOR.textDim,
+                            textTransform: 'uppercase',
+                        }}>
+                            选择节目单
+                        </div>
+
+                        {/* Rundown 列表 */}
+                        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                            {summaries.length === 0 ? (
+                                <div style={{ padding: '20px 16px', color: COLOR.textDim, fontSize: 12 }}>
+                                    暂无节目单
+                                </div>
+                            ) : summaries.map(s => {
+                                const isSelected = s.id === selectedId
+                                const isActive   = s.lifecycle === 'active' || s.lifecycle === 'on-air'
+                                const lcColor    = isActive ? COLOR.pvw : s.lifecycle === 'standby' ? COLOR.next : COLOR.gray
+                                return (
+                                    <div
+                                        key={s.id}
+                                        onClick={() => setSelectedId(s.id)}
+                                        style={{
+                                            display:    'flex',
+                                            alignItems: 'center',
+                                            gap:        12,
+                                            padding:    '10px 16px',
+                                            cursor:     'pointer',
+                                            background: isSelected ? '#1A1A2E' : 'transparent',
+                                            borderLeft: isSelected ? `3px solid ${COLOR.pvw}` : '3px solid transparent',
+                                            borderBottom: `1px solid ${COLOR.border}`,
+                                        }}
+                                    >
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{
+                                                fontSize:   13,
+                                                fontWeight: 600,
+                                                color:      isSelected ? COLOR.text : COLOR.textDim,
+                                            }}>
+                                                {s.name}
+                                            </div>
+                                            <div style={{ fontSize: 11, color: COLOR.textDim, marginTop: 2 }}>
+                                                {s.segmentCount} 个段落
+                                            </div>
+                                        </div>
+                                        <div style={{
+                                            fontFamily:    '"JetBrains Mono", monospace',
+                                            fontSize:      9,
+                                            fontWeight:    700,
+                                            letterSpacing: '0.1em',
+                                            color:         lcColor,
+                                        }}>
+                                            {s.lifecycle.toUpperCase()}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+
+                        {/* 底部按钮 */}
+                        <div style={{
+                            display:       'flex',
+                            justifyContent:'flex-end',
+                            gap:           8,
+                            padding:       '10px 16px',
+                            borderTop:     `1px solid ${COLOR.border}`,
+                        }}>
+                            <button
+                                onClick={() => { setShowRundownPanel(false); setSelectedId(null) }}
+                                style={{
+                                    padding:      '5px 16px',
+                                    background:   'transparent',
+                                    border:       `1px solid ${COLOR.border}`,
+                                    borderRadius: 2,
+                                    color:        COLOR.textDim,
+                                    fontSize:     12,
+                                    cursor:       'pointer',
+                                }}
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (selectedId && connected) {
+                                        activate(selectedId)
+                                        setShowRundownPanel(false)
+                                        setSelectedId(null)
+                                    }
+                                }}
+                                disabled={!selectedId || !connected}
+                                style={{
+                                    padding:      '5px 16px',
+                                    background:   selectedId && connected ? COLOR.pvw + '22' : 'transparent',
+                                    border:       `1px solid ${selectedId && connected ? COLOR.pvw : COLOR.border}`,
+                                    borderRadius: 2,
+                                    color:        selectedId && connected ? COLOR.pvw : COLOR.textDim,
+                                    fontSize:     12,
+                                    fontWeight:   700,
+                                    cursor:       selectedId && connected ? 'pointer' : 'not-allowed',
+                                }}
+                            >
+                                激 活
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── 断线横幅 ── */}
             {isDisconnected && (
@@ -177,11 +321,21 @@ export default function App() {
                             disabled={!connected}
                         />
                     ) : (
-                        <RundownSelector
-                            summaries={summaries}
-                            onActivate={connected ? activate : () => {}}
-                            disabled={!connected}
-                        />
+                        <div style={{
+                            flex:           1,
+                            display:        'flex',
+                            alignItems:     'center',
+                            justifyContent: 'center',
+                            flexDirection:  'column',
+                            gap:            12,
+                            color:          COLOR.textDim,
+                            fontFamily:     '"JetBrains Mono", monospace',
+                            fontSize:       11,
+                            letterSpacing:  '0.12em',
+                        }}>
+                            <div>NO ACTIVE RUNDOWN</div>
+                            <div style={{ fontSize: 10, opacity: 0.5 }}>点击顶栏 RUNDOWN 选择节目单</div>
+                        </div>
                     )}
                 </div>
 
@@ -220,11 +374,12 @@ export default function App() {
 
 // ─── 顶栏 ─────────────────────────────────────────────────────────────────────
 
-function Header({ connected, rundownName, engineState, clock }: {
-    connected:   boolean
-    rundownName: string | null
-    engineState: string
-    clock:       string
+function Header({ connected, rundownName, engineState, clock, onOpenRundown }: {
+    connected:      boolean
+    rundownName:    string | null
+    engineState:    string
+    clock:          string
+    onOpenRundown:  () => void   // ← 新增
 }) {
     const engineColor =
         engineState === 'RUNNING'    ? COLOR.pgm  :
@@ -287,6 +442,25 @@ function Header({ connected, rundownName, engineState, clock }: {
                 {rundownName ?? '— 未选择节目单 —'}
             </div>
 
+            {/* RUNDOWN 菜单按钮 */}
+            <button
+                onClick={onOpenRundown}
+                style={{
+                    fontFamily:    '"JetBrains Mono", monospace',
+                    fontSize:      10,
+                    fontWeight:    700,
+                    letterSpacing: '0.1em',
+                    color:         COLOR.text,
+                    background:    'transparent',
+                    border:        `1px solid ${COLOR.border}`,
+                    padding:       '3px 10px',
+                    borderRadius:  2,
+                    cursor:        'pointer',
+                }}
+            >
+                RUNDOWN ▾
+            </button>
+
             {/* ENGINE 状态 */}
             <div style={{
                 fontFamily:    '"JetBrains Mono", monospace',
@@ -320,7 +494,7 @@ function Header({ connected, rundownName, engineState, clock }: {
 
 // ─── Rundown 选择器（无活跃 Rundown 时显示） ──────────────────────────────────
 
-function RundownSelector({ summaries, onActivate, disabled }: {
+/* function RundownSelector({ summaries, onActivate, disabled }: {
     summaries:  RundownSummary[]
     onActivate: (id: string) => void
     disabled:   boolean
@@ -421,7 +595,7 @@ function RundownSelector({ summaries, onActivate, disabled }: {
             )}
         </div>
     )
-}
+} */
 
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 

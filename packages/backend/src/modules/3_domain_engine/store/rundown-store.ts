@@ -87,19 +87,10 @@ export class RundownStore extends EventEmitter<RundownStoreEvents> {
                 this._rundowns.set(id, rundown);
                 persistRO(ro);
 
-                if (hasOnAir) {
-                    // 当前有节目在播，进入待命
-                    this._setLifecycle(id, 'standby');
-                    logger.info(`[RundownStore] Created (standby): "${id}" "${rundown.name}"`);
-                    this.emit('rundownCreated', id, rundown);
-                    this.emit('rundownStandby', id);
-                } else {
-                    // 空闲，直接激活
-                    this._activateExclusive(id);
-                    logger.info(`[RundownStore] Created (auto-activated): "${id}" "${rundown.name}"`);
-                    this.emit('rundownCreated', id, rundown);
-                    this.emit('rundownActivated', id, rundown);
-                }
+                this._setLifecycle(id, 'standby');
+                logger.info(`[RundownStore] Created (standby): "${id}" "${rundown.name}"`);
+                this.emit('rundownCreated', id, rundown);
+                this.emit('rundownStandby', id);
             } catch (err) {
                 logger.error('[RundownStore] Failed to convert roCreated:', err);
             }
