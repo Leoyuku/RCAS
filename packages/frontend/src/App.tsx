@@ -14,9 +14,6 @@
 import { useEffect, useState } from 'react'
 import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
-import type { IRundown }       from '../../core-lib/src/models/rundown-model'
-import type { IPart }          from '../../core-lib/src/models/part-model'
-import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
@@ -34,15 +31,6 @@ const COLOR = {
     textDim: '#666',
 }
 
-// 格式化毫秒为 M:SS
-function fmtMs(ms: number): string {
-    if (!ms || ms <= 0) return '0:00'
-    const totalSec = Math.floor(ms / 1000)
-    const m = Math.floor(totalSec / 60)
-    const s = totalSec % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
-}
-
 // 实时时钟 hook
 function useClock() {
     const [time, setTime] = useState(() => new Date())
@@ -53,39 +41,15 @@ function useClock() {
     return time.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-// ON AIR 进度条 hook
-function useElapsedMs(startedAt: number | null): number {
-    const [elapsed, setElapsed] = useState(0)
-    useEffect(() => {
-        if (!startedAt) { setElapsed(0); return }
-        const tick = () => setElapsed(Date.now() - startedAt)
-        tick()
-        const t = setInterval(tick, 250)
-        return () => clearInterval(t)
-    }, [startedAt])
-    return elapsed
-}
-
-// ─── 工具函数 ─────────────────────────────────────────────────────────────────
-
-function findPart(rundown: IRundown | null, partId: string | null): IPart | null {
-    if (!rundown || !partId) return null
-    for (const seg of rundown.segments ?? []) {
-        for (const part of seg.parts ?? []) {
-            if (part._id === partId) return part
-        }
-    }
-    return null
-}
-
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 
 export default function App() {
     const {
         connected, summaries, activeRundown, runtime,
-        activate, take, sendToPreview, setNext, _initSocket,
+        activate, take, setNext, run, _initSocket,
     } = useRCASStore()
 
+    const [isRunning, setIsRunning] = useState(false)
     const clock = useClock()
     const [showRundownPanel, setShowRundownPanel] = useState(false)
     const [selectedId, setSelectedId]             = useState<string | null>(null)
@@ -99,10 +63,9 @@ export default function App() {
             if ((e.target as HTMLElement).tagName === 'INPUT') return
             if (e.code === 'Space') {
                 e.preventDefault()
-                take()
+                if (isRunning) take()
             } else if (e.code === 'Enter') {
                 e.preventDefault()
-                sendToPreview()
             } else if (e.code === 'F11') {
                 e.preventDefault()
                 document.documentElement.requestFullscreen?.()
@@ -113,16 +76,11 @@ export default function App() {
         }
         window.addEventListener('keydown', handler)
         return () => window.removeEventListener('keydown', handler)
-    }, [take, sendToPreview])
+    }, [take, isRunning])
 
     const engineState    = runtime?.engineState ?? 'STOPPED'
     const isDisconnected = !connected
     const activeSum      = summaries.find(s => s.lifecycle === 'active' || s.lifecycle === 'on-air')
-
-    // 当前 on-air / preview / next 的 Part
-    const onAirPart   = findPart(activeRundown, runtime?.onAirPartId   ?? null)
-    const previewPart = findPart(activeRundown, runtime?.previewPartId ?? null)
-    const nextPart    = findPart(activeRundown, runtime?.nextPartId    ?? null)
 
     // 是否有活跃 Rundown 数据
     const hasRundown = activeRundown !== null
@@ -146,6 +104,16 @@ export default function App() {
                 engineState={engineState}
                 clock={clock}
                 onOpenRundown={() => setShowRundownPanel(true)}
+                onRun={() => {
+                    if (!isRunning) {
+                        run()
+                        setIsRunning(true)
+                    } else {
+                        setIsRunning(false)
+                    }
+                }}
+                isRunning={isRunning}
+                hasRundown={hasRundown}
             />
 
             {/* ── Rundown 选择面板 ── */}
@@ -346,15 +314,7 @@ export default function App() {
                     flexDirection: 'column',
                     overflow:      'hidden',
                 }}>
-                    <RightPanel
-                        onAirPart={onAirPart}
-                        previewPart={previewPart}
-                        nextPart={nextPart}
-                        runtime={runtime}
-                        connected={connected}
-                        onTake={take}
-                        onSendToPreview={sendToPreview}
-                    />
+                    <RightPanel />
                 </div>
 
             </div>
@@ -374,12 +334,15 @@ export default function App() {
 
 // ─── 顶栏 ─────────────────────────────────────────────────────────────────────
 
-function Header({ connected, rundownName, engineState, clock, onOpenRundown }: {
-    connected:      boolean
-    rundownName:    string | null
-    engineState:    string
-    clock:          string
-    onOpenRundown:  () => void   // ← 新增
+function Header({ connected, rundownName, engineState, clock, onOpenRundown, onRun, isRunning, hasRundown }: {
+    connected:     boolean
+    rundownName:   string | null
+    engineState:   string
+    clock:         string
+    onOpenRundown: () => void
+    onRun:         () => void
+    isRunning:     boolean
+    hasRundown:    boolean
 }) {
     const engineColor =
         engineState === 'RUNNING'    ? COLOR.pgm  :
@@ -441,6 +404,27 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown }: {
             }}>
                 {rundownName ?? '— 未选择节目单 —'}
             </div>
+
+            {/* RUN 按钮 — 只有激活了 Rundown 才显示 */}
+            {hasRundown && (
+                <button
+                    onClick={onRun}
+                    style={{
+                        fontFamily:    '"JetBrains Mono", monospace',
+                        fontSize:      10,
+                        fontWeight:    700,
+                        letterSpacing: '0.1em',
+                        color:         isRunning ? COLOR.pgm : COLOR.pvw,
+                        background:    isRunning ? COLOR.pgm + '22' : COLOR.pvw + '22',
+                        border:        `1px solid ${isRunning ? COLOR.pgm : COLOR.pvw}`,
+                        padding:       '3px 10px',
+                        borderRadius:  2,
+                        cursor:        'pointer',
+                    }}
+                >
+                    {isRunning ? '■ STOP' : '▶ RUN'}
+                </button>
+            )}
 
             {/* RUNDOWN 菜单按钮 */}
             <button
@@ -599,21 +583,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown }: {
 
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 
-function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTake, onSendToPreview }: {
-    onAirPart:       IPart | null
-    previewPart:     IPart | null
-    nextPart:        IPart | null
-    runtime:         RundownRuntime | null
-    connected:       boolean
-    onTake:          () => void
-    onSendToPreview: () => void
-}) {
-    const engineState = runtime?.engineState ?? 'STOPPED'
-    const canOperate  = connected && engineState !== 'STOPPED' && engineState !== 'ERROR'
-
-    const onAirDur = onAirPart?.expectedDuration ?? 0
-    const elapsed  = useElapsedMs(runtime && onAirPart ? Date.now() - 30000 : null)
-
+function RightPanel() {
     return (
         <div style={{
             display:       'flex',
@@ -630,176 +600,21 @@ function RightPanel({ onAirPart, previewPart, nextPart, runtime, connected, onTa
                 borderBottom:        `1px solid ${COLOR.border}`,
                 flexShrink:          0,
             }}>
-                <MonitorPlaceholder label="PVW" color={COLOR.pvw} part={previewPart} />
-                <MonitorPlaceholder label="PGM" color={COLOR.pgm} part={onAirPart}   />
+                <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
+                <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
             </div>
 
-            {/* ── ON AIR 状态 ── */}
-            <StatusBlock
-                label="ON AIR"
-                color={COLOR.pgm}
-                part={onAirPart}
-                showProgress={!!onAirPart}
-                elapsed={elapsed}
-                duration={onAirDur}
-            />
-
-            <div style={{ height: 1, background: COLOR.border, flexShrink: 0 }}/>
-
-            {/* ── PREVIEW 状态 ── */}
-            <StatusBlock
-                label="PREVIEW"
-                color={COLOR.pvw}
-                part={previewPart}
-                showProgress={false}
-                elapsed={0}
-                duration={0}
-            />
-
-            {/* 弹性占位 */}
-            <div style={{ flex: 1 }}/>
-
-            {/* ── NEXT 小提示 ── */}
-            {nextPart && (
-                <div style={{
-                    padding:    '6px 14px',
-                    borderTop:  `1px solid ${COLOR.border}`,
-                    display:    'flex',
-                    alignItems: 'center',
-                    gap:        8,
-                    flexShrink: 0,
-                }}>
-                    <span style={{
-                        fontSize:      9,
-                        fontWeight:    700,
-                        color:         COLOR.next,
-                        letterSpacing: '0.1em',
-                        fontFamily:    '"JetBrains Mono", monospace',
-                    }}>NEXT</span>
-                    <span style={{
-                        fontSize:     12,
-                        color:        '#FFD06B',
-                        overflow:     'hidden',
-                        whiteSpace:   'nowrap',
-                        textOverflow: 'ellipsis',
-                    }}>
-                        {nextPart.title}
-                    </span>
-                    <span style={{
-                        marginLeft: 'auto',
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize:   11,
-                        color:      COLOR.textDim,
-                    }}>
-                        {fmtMs(nextPart.expectedDuration)}
-                    </span>
-                </div>
-            )}
-
-            {/* ── 操作按钮区 ── */}
-            <div style={{
-                padding:       '10px 12px 14px',
-                borderTop:     `1px solid ${COLOR.border}`,
-                display:       'flex',
-                flexDirection: 'column',
-                gap:           8,
-                flexShrink:    0,
-                background:    '#0C0C0C',
-            }}>
-                {/* SEND TO PREVIEW */}
-                <button
-                    onClick={canOperate ? onSendToPreview : undefined}
-                    disabled={!canOperate}
-                    title="Enter"
-                    style={{
-                        height:        38,
-                        background:    canOperate ? '#0A2416' : '#111',
-                        border:        `1px solid ${canOperate ? COLOR.pvw + '66' : COLOR.border}`,
-                        borderRadius:  3,
-                        color:         canOperate ? COLOR.pvw : COLOR.textDim,
-                        fontSize:      12,
-                        fontWeight:    700,
-                        letterSpacing: '0.15em',
-                        cursor:        canOperate ? 'pointer' : 'not-allowed',
-                        fontFamily:    '"JetBrains Mono", monospace',
-                        transition:    'all 0.1s',
-                        display:       'flex',
-                        alignItems:    'center',
-                        justifyContent:'center',
-                        gap:           8,
-                    }}
-                >
-                    SEND TO PREVIEW
-                    <span style={{ fontSize: 9, opacity: 0.5 }}>Enter</span>
-                </button>
-
-                {/* TAKE */}
-                <button
-                    onClick={canOperate ? onTake : undefined}
-                    disabled={!canOperate}
-                    title="Space"
-                    style={{
-                        height:        64,
-                        background:    canOperate ? '#2D0000' : '#111',
-                        border:        `1px solid ${canOperate ? COLOR.pgm : COLOR.border}`,
-                        borderRadius:  4,
-                        color:         canOperate ? '#FFF' : COLOR.textDim,
-                        fontSize:      20,
-                        fontWeight:    700,
-                        letterSpacing: '0.25em',
-                        cursor:        canOperate ? 'pointer' : 'not-allowed',
-                        transition:    'all 0.1s',
-                        position:      'relative',
-                        overflow:      'hidden',
-                        boxShadow:     canOperate ? `0 0 16px ${COLOR.pgm}33` : 'none',
-                        fontFamily:    '"JetBrains Mono", monospace',
-                    }}
-                    onMouseEnter={e => {
-                        if (canOperate) {
-                            const b = e.currentTarget as HTMLButtonElement
-                            b.style.background = '#3D0000'
-                            b.style.boxShadow  = `0 0 24px ${COLOR.pgm}55`
-                        }
-                    }}
-                    onMouseLeave={e => {
-                        if (canOperate) {
-                            const b = e.currentTarget as HTMLButtonElement
-                            b.style.background = '#2D0000'
-                            b.style.boxShadow  = `0 0 16px ${COLOR.pgm}33`
-                        }
-                    }}
-                    onMouseDown={e => {
-                        if (canOperate)
-                            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.98)'
-                    }}
-                    onMouseUp={e => {
-                        if (canOperate)
-                            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'
-                    }}
-                >
-                    TAKE
-                    <span style={{
-                        position:      'absolute',
-                        bottom:        4,
-                        right:         10,
-                        fontSize:      9,
-                        opacity:       0.35,
-                        letterSpacing: '0.05em',
-                    }}>
-                        SPACE
-                    </span>
-                </button>
-            </div>
+            {/* 空白区域，等待后续功能 */}
+            <div style={{ flex: 1 }} />
         </div>
     )
 }
 
 // ─── 监看占位块 ───────────────────────────────────────────────────────────────
 
-function MonitorPlaceholder({ label, color, part }: {
+function MonitorPlaceholder({ label, color }: {
     label: string
     color: string
-    part:  IPart | null
 }) {
     return (
         <div style={{
@@ -812,21 +627,19 @@ function MonitorPlaceholder({ label, color, part }: {
             position:       'relative',
             overflow:       'hidden',
         }}>
-            {/* Tally 边框 */}
             <div style={{
                 position:      'absolute',
                 inset:         0,
-                border:        `2px solid ${part ? color : COLOR.border}`,
+                border:        `2px solid ${color}33`,
                 pointerEvents: 'none',
             }}/>
-            {/* 标签 */}
             <div style={{
                 position:      'absolute',
                 top:           6,
                 left:          8,
                 fontSize:      9,
                 fontWeight:    700,
-                color:         part ? color : COLOR.textDim,
+                color:         color,
                 letterSpacing: '0.12em',
                 background:    '#000000AA',
                 padding:       '1px 4px',
@@ -834,115 +647,9 @@ function MonitorPlaceholder({ label, color, part }: {
             }}>
                 {label}
             </div>
-            {/* 内容 */}
-            <div style={{
-                fontSize:   11,
-                color:      COLOR.textDim,
-                textAlign:  'center',
-                lineHeight: 1.6,
-            }}>
-                {part ? (
-                    <span style={{ color, fontWeight: 600 }}>
-                        {part.title.slice(0, 20)}
-                    </span>
-                ) : (
-                    <span>— 无信号 —</span>
-                )}
+            <div style={{ fontSize: 11, color: COLOR.textDim }}>
+                — 无信号 —
             </div>
-        </div>
-    )
-}
-
-// ─── 状态块（ON AIR / PREVIEW） ───────────────────────────────────────────────
-
-function StatusBlock({ label, color, part, showProgress, elapsed, duration }: {
-    label:        string
-    color:        string
-    part:         IPart | null
-    showProgress: boolean
-    elapsed:      number
-    duration:     number
-}) {
-    const progress  = duration > 0 ? Math.min(elapsed / duration, 1) : 0
-    const remaining = Math.max(duration - elapsed, 0)
-    const barColor  =
-        remaining > 30000 ? COLOR.pvw  :
-        remaining > 10000 ? COLOR.next :
-        COLOR.pgm
-
-    return (
-        <div style={{
-            padding:    '8px 14px 10px',
-            background: part ? color + '0D' : 'transparent',
-            flexShrink: 0,
-        }}>
-            <div style={{
-                display:      'flex',
-                alignItems:   'center',
-                gap:          8,
-                marginBottom: part ? 6 : 0,
-            }}>
-                <span style={{
-                    fontSize:      9,
-                    fontWeight:    700,
-                    color:         part ? color : COLOR.textDim,
-                    letterSpacing: '0.12em',
-                    background:    part ? color + '22' : 'transparent',
-                    padding:       '2px 6px',
-                    borderRadius:  2,
-                    fontFamily:    '"JetBrains Mono", monospace',
-                }}>
-                    {label}
-                </span>
-                {part && (
-                    <span style={{
-                        fontSize:     13,
-                        fontWeight:   600,
-                        color:        color === COLOR.pgm ? '#FF8888' : '#88FF88',
-                        overflow:     'hidden',
-                        whiteSpace:   'nowrap',
-                        textOverflow: 'ellipsis',
-                        flex:         1,
-                    }}>
-                        {part.title}
-                    </span>
-                )}
-                {!part && (
-                    <span style={{ color: COLOR.textDim, fontSize: 12 }}>—</span>
-                )}
-            </div>
-
-            {showProgress && part && duration > 0 && (
-                <div>
-                    <div style={{
-                        height:       4,
-                        background:   '#222',
-                        borderRadius: 2,
-                        overflow:     'hidden',
-                        marginBottom: 4,
-                    }}>
-                        <div style={{
-                            height:       '100%',
-                            width:        `${progress * 100}%`,
-                            background:   barColor,
-                            borderRadius: 2,
-                            transition:   'width 0.25s linear',
-                            boxShadow:    `0 0 6px ${barColor}88`,
-                        }}/>
-                    </div>
-                    <div style={{
-                        display:        'flex',
-                        justifyContent: 'space-between',
-                        fontFamily:     '"JetBrains Mono", monospace',
-                        fontSize:       11,
-                        color:          COLOR.textDim,
-                    }}>
-                        <span>{fmtMs(elapsed)}</span>
-                        <span style={{ color: barColor }}>{fmtMs(remaining)} 剩余</span>
-                        <span>{fmtMs(duration)}</span>
-                    </div>
-                </div>
-            )}
         </div>
     )
 }

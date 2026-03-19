@@ -66,7 +66,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
                 engineState:   'READY',
                 onAirPartId:   null,
                 previewPartId: null,
-                nextPartId:    parts[0]._id,
+                nextPartId:    null,
             });
 
             logger.info(`[RundownEngine] Ready: "${id}", first part: "${parts[0]._id}"`);
@@ -149,6 +149,25 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         this._startStateLoop()
         logger.info(`[RundownEngine] TAKE → onAir: "${takePartId}", next: "${newNextId}"`);
         return { ok: true };
+    }
+
+    intentRun(): { ok: boolean; error?: string } {
+        if (!this._runtime) {
+            return { ok: false, error: 'No active rundown' }
+        }
+        const parts = this._getAllParts(this._runtime.rundownId)
+        if (parts.length === 0) {
+            return { ok: false, error: 'No parts in rundown' }
+        }
+        this._setRuntime({
+            ...this._runtime,
+            engineState:   'READY',
+            onAirPartId:   null,
+            previewPartId: parts[0]._id,
+            nextPartId:    parts[1]?._id ?? null,
+        })
+        logger.info(`[RundownEngine] RUN → preview: "${parts[0]._id}"`)
+        return { ok: true }
     }
 
     /**

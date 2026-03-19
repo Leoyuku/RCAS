@@ -38,6 +38,7 @@ interface RCASStore {
 
     // 操作
     activate: (id: string) => void
+    run: () => void
     take: () => void
     sendToPreview: () => void
     setNext: (partId: string) => void
@@ -193,6 +194,13 @@ export const useRCASStore = create<RCASStore>((set) => ({
         if (!socket) return
         socket.emit('intent:take', (result) => {
             if (!result?.ok) console.error('[Socket] TAKE failed:', result?.error)
+        })
+    },
+
+    run: () => {
+        if (!socket) return
+        socket.emit('intent:run', (result) => {
+            if (!result?.ok) console.error('[Socket] RUN failed:', result?.error)
         })
     },
 

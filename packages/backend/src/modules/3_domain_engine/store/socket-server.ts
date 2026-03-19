@@ -112,6 +112,13 @@ export class SocketServer {
                 if (callback) callback(result);
             });
 
+            // intent: RUN
+            socket.on('intent:run', (callback) => {
+                logger.info(`[SocketServer] intent:run from ${clientID}`)
+                const result = rundownEngine.intentRun()
+                if (callback) callback(result)
+            })
+
             // intent: SEND TO PREVIEW
             socket.on('intent:sendToPreview', (callback) => {
                 logger.info(`[SocketServer] intent:sendToPreview from ${clientID}`);

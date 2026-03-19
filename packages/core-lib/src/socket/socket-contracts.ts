@@ -45,6 +45,7 @@ export interface ClientToServerEvents {
         callback?: (result: { ok: boolean; error?: string }) => void
     ) => void;
 
+    'intent:run': (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:take':          (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:sendToPreview': (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:setNext':       (payload: { partId: string }, callback?: (result: { ok: boolean; error?: string }) => void) => void;
