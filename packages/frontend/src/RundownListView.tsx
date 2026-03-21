@@ -429,40 +429,47 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                         flexDirection: 'column',
                         height:        '100%',
                         overflow:      'hidden',
+                        paddingTop:    2,
+                        paddingBottom: 9,
                     }}>
-                            {/* 上半：标题，固定高度 */}
+                            {/* 上半：标题 */}
                             <div style={{
-                                height:          '50%',
-                                padding:         '6px 8px',
-                                overflow:        'hidden',
-                                display:         '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                lineHeight:      '1.4',
-                                fontFamily:      C.sans,
-                                fontSize:        11,
-                                fontWeight:      600,
-                                color:           '#FFF',
+                                flex:       1,
+                                minHeight:  0,
+                                padding:    '4px 8px',
+                                overflow:   'hidden',
+                                position:   'relative',
                             }}>
-                                {segment.name || segment.externalId}
+                                <div style={{
+                                    fontFamily:  C.sans,
+                                    fontSize:    11,
+                                    fontWeight:  600,
+                                    color:       '#FFF',
+                                    lineHeight:  '1.35',
+                                    maxHeight:   '2.7em',    // ← 2行 × 1.35 line-height = 2.7em
+                                    overflow:    'hidden',
+                                    wordBreak:   'break-all',
+                                }}>
+                                    {segment.name || segment.externalId}
+                                </div>
                             </div>
                             {/* 下半：TYPE 填满 */}
                             <div style={{
-                                height:         '50%',
+                                flexShrink:     0,           // ← 改：固定高度，不被压缩
+                                height:         36,          // ← 固定36px，不用百分比
                                 display:        'flex',
                                 alignItems:     'center',
                                 justifyContent: 'center',
-                                marginBottom:   10, 
                                 background:     ts.color,
                                 fontFamily:     C.mono,
-                                fontSize:       16,        // 改大
+                                fontSize:       16,
                                 fontWeight:     800,
                                 color:          '#FFF',
                                 letterSpacing:  '0.06em',
-                                whiteSpace:     'nowrap',  // 不换行
+                                whiteSpace:     'nowrap',
                             }}>
                                 <span>{ts.line1}</span>
-                                {ts.line2 && <span>{ts.line2}</span>}
+                                {ts.line2 && <span style={{marginLeft: 4}}>{ts.line2}</span>}
                             </div>
                         </div>
                     )
