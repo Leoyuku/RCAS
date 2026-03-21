@@ -11,7 +11,7 @@
  *   - PG 号按 Segment 序号编号
  *
  * 列布局（6列）：
- *   ST-ICON(28) | PG(44) | SLUG/ELEMENTS(1fr) | DUR(56) | BACK(64) | ST(28)
+ *  | PG(44) | SLUG/ELEMENTS(1fr) | DUR(56) | BACK(64) | ST(28)
  */
 
 import { useMemo, useRef, useEffect, useState, forwardRef } from 'react'
