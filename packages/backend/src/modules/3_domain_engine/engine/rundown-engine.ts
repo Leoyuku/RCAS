@@ -174,6 +174,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
      * SET NEXT：手动指定下一个要播的 Part
      */
     intentSetNext(partId: string): { ok: boolean; error?: string } {
+        logger.info(`[RundownEngine] intentSetNext called with: "${partId}"`)
         if (!this._runtime) {
             return { ok: false, error: 'No active rundown' };
         }
@@ -186,10 +187,10 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
 
         this._setRuntime({
             ...this._runtime,
+            previewPartId: partId,
             nextPartId: partId,
         });
 
-        logger.info(`[RundownEngine] SET NEXT → "${partId}"`);
         return { ok: true };
     }
 

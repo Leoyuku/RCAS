@@ -2,14 +2,16 @@
  * @file RundownListView.tsx
  * @description RCAS Rundown 列表组件 — 折叠模式（第一轮默认）
  *
- * 修改记录 2026-03-21 v2：
- *   统一纯色底 + 顶层遮罩方案
- *   - 所有行：纯色底，渐变完全交给遮罩层
- *   - 遮罩统一只做一件事：顶部轻微高光，底部变暗
- *   - ON AIR：纯红色底
- *   - PREVIEW：纯绿色底
- *   - 已播/未播：纯灰色底
- *   - 缩略图半透明，自然融入各种底色
+ * 显示规范（折叠模式）：
+ *   - 每条 ISegment（Story）占一行，显示 storySlug 作为标题
+ *   - 内部 IPart（Item）以胶囊标签形式内联显示在标题下方
+ *   - 胶囊标签显示类型（CAM / VT / VO 等），可点击 SET NEXT
+ *   - DUR = 整条 Story 所有 Parts 时长之和
+ *   - 状态颜色跟包含 ON AIR / PVW / NEXT Part 的 Story 行走
+ *   - PG 号按 Segment 序号编号
+ *
+ * 列布局（6列）：
+ *  | PG(80) | SLUG/ELEMENTS(1fr) | DUR(56) | BACK(64) | ST(28)
  */
 
 import { useMemo, useRef, useEffect, useState, forwardRef } from 'react'
@@ -29,14 +31,28 @@ const C = {
     borderMid: '#252d3a',
     borderStrong: '#2d3848',
     textPrimary: '#dde4ee',
-    textSec: '#FFFFFF',
-    textDim: '#FFFFFF',
+    textSec:      '#FFFFFF',
+    textDim:      '#FFFFFF',
 
+    // ON AIR — 广播标准红
+    pgmBg:     '#1A0000',
     pgmBorder: '#f8071d',
+    pgmText:   '#FFFFFF',
+    pgmLabel:  '#f8071d',
+    pgmFade:   'rgba(248,7,29,.6)',
+
+    // PREVIEW — 广播标准绿
+    pvwBg:     '#001A00',
     pvwBorder: '#0ac242',
-    pvwLabel: '#0ac242',
+    pvwText:   '#FFFFFF',
+    pvwLabel:  '#0ac242',
+    pvwFade:   'rgba(10,194,66,.6)',
+
+    // NEXT — 琥珀
+    nxtBg: '#140f00',
     nxtBorder: '#8a6a00',
     nxtText: '#e0b830',
+    nxtFade: 'rgba(138,106,0,.55)',
 
     mono: '"IBM Plex Mono", "JetBrains Mono", monospace',
     sans: '"IBM Plex Sans Condensed", "Helvetica Neue", sans-serif',
@@ -45,9 +61,9 @@ const C = {
 // ─── Story 显示类型系统 ───────────────────────────────────────────────────────
 
 type StoryDisplayType =
-    'COLD_OPEN' | 'TEASER' | 'OPENING' | 'COMING_BACK' | 'ENDING' |
+    'COLD_OPEN' | 'TEASER' | 'OPENING' | 'COME_BACK' | 'ENDING' |
     'PKG' | 'VO' | 'CAM' | 'LIVE' | 'WEATHER' |
-    'BREAK' | 'AD' | 'UNKNOWN'
+    'BREAK' | 'COMM' | 'UNKNOWN'
 
 interface StoryTypeStyle {
     line1: string
@@ -60,7 +76,7 @@ const STORY_TYPE_STYLE: Record<StoryDisplayType, StoryTypeStyle> = {
     COLD_OPEN: { line1: 'COLD', line2: 'OPEN', color: '#E8572A', bg: 'rgba(232,87,42,.18)' },
     TEASER: { line1: 'TEASER', color: '#E89020', bg: 'rgba(232,144,32,.18)' },
     OPENING: { line1: 'OPENING', color: '#D4A800', bg: 'rgba(212,168,0,.18)' },
-    COMING_BACK: { line1: 'COMING', line2: 'BACK', color: '#2A9D8F', bg: 'rgba(42,157,143,.18)' },
+    COME_BACK: { line1: 'COME', line2: 'BACK', color: '#2A9D8F', bg: 'rgba(42,157,143,.18)' },
     ENDING: { line1: 'ENDING', color: '#4A7FA5', bg: 'rgba(74,127,165,.18)' },
     PKG: { line1: 'PKG', color: '#7B5EA7', bg: 'rgba(123,94,167,.18)' },
     VO: { line1: 'VO', color: '#2E8B57', bg: 'rgba(46,139,87,.18)' },
@@ -68,7 +84,7 @@ const STORY_TYPE_STYLE: Record<StoryDisplayType, StoryTypeStyle> = {
     LIVE: { line1: 'LIVE', color: '#C0392B', bg: 'rgba(192,57,43,.18)' },
     WEATHER: { line1: 'WEATHER', color: '#5B9BD5', bg: 'rgba(91,155,213,.18)' },
     BREAK: { line1: 'BREAK', color: '#5A6B7A', bg: 'rgba(90,107,122,.18)' },
-    AD: { line1: 'AD', color: '#8B2020', bg: 'rgba(139,32,32,.18)' },
+    COMM: { line1: 'COMM', color: '#8B2020', bg: 'rgba(139,32,32,.18)' },
     UNKNOWN: { line1: '???', color: '#4a5568', bg: 'rgba(74,85,104,.12)' },
 }
 
@@ -80,12 +96,14 @@ function ThumbnailPlaceholder({ type, isOnAir, isPreview }: {
     isPreview: boolean
 }) {
     const isCAM = type === PartType.KAM
+    const borderColor = isOnAir ? 'rgb(206,0,24)' : isPreview ? 'rgb(0,195,91)' : 'rgba(255,255,255,0.1)'
 
     return (
         <div style={{
             width: 160,
             height: 90,
-            background: 'rgba(0,0,0,0.28)',
+            background: '#0a0a0a',
+            border: `2px solid ${borderColor}`,
             borderRadius: 2,
             display: 'flex',
             flexDirection: 'column',
@@ -93,51 +111,59 @@ function ThumbnailPlaceholder({ type, isOnAir, isPreview }: {
             justifyContent: 'center',
             flexShrink: 0,
             position: 'relative',
-            //boxShadow: '0 0 0 1px rgba(255,255,255,0.08)',
-            boxShadow: isOnAir
-                ? '0 0 0 3px #f8071d, 0 0 12px 3px rgba(248,7,29,1)'
-                : isPreview
-                ? '0 0 0 3px #0ac242, 0 0 12px 3px rgba(10,194,66,1)'
-                : '0 0 0 1px rgba(255,255,255,0.08)',
+            overflow: 'hidden',
         }}>
+            {/* 图标 */}
             <div style={{
                 fontSize: 24,
-                opacity: isOnAir || isPreview ? 0.3 : 0.18,
+                opacity: 0.25,
                 marginBottom: 4,
             }}>
                 {isCAM ? '🎥' : '▶'}
             </div>
+            {/* 类型标签 */}
             <div style={{
                 fontFamily: C.mono,
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: '0.1em',
-                color: 'rgba(255,255,255,0.2)',
+                color: 'rgba(255,255,255,0.25)',
             }}>
                 {isCAM ? 'CAM' : 'VT/VO'}
             </div>
+            {/* 状态边框发光效果 */}
+            {(isOnAir || isPreview) && (
+                <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    boxShadow: isOnAir
+                        ? 'inset 0 0 12px rgba(206,0,24,0.3)'
+                        : 'inset 0 0 12px rgba(0,195,91,0.3)',
+                    pointerEvents: 'none',
+                }} />
+            )}
         </div>
     )
 }
-
-// ─── Story 类型判断 ───────────────────────────────────────────────────────────
 
 function getStoryDisplayType(segment: ISegment): StoryDisplayType {
     const slug = segment.name.toUpperCase()
     const parts = segment.parts ?? []
 
+    // 第一步：storySlug 关键词匹配（优先级最高）
     if (slug.includes('COLD') || slug.includes('COLD_OPEN')) return 'COLD_OPEN'
     if (slug.includes('TEASER')) return 'TEASER'
     if (slug.includes('OPENING') || slug.includes('OPEN')) return 'OPENING'
     if (slug.includes('COMING') || slug.includes('COME_BACK')
-        || slug.includes('COMING_BACK') || slug.includes('COMINGBACK')) return 'COMING_BACK'
+        || slug.includes('COMING_BACK') || slug.includes('COMINGBACK')) return 'COME_BACK'
     if (slug.includes('ENDING') || slug.includes('GOODBYE')) return 'ENDING'
     if (slug.includes('BREAK') || slug.includes('BRK')) return 'BREAK'
-    if (slug.includes('COMMERCIAL') || slug.includes('AD')
-        || slug.includes('AD_')) return 'AD'
+    if (slug.includes('COMMERCIAL') || slug.includes('COMM')
+        || slug.includes('AD_')) return 'COMM'
     if (slug.includes('WEATHER') || slug.includes('WX')) return 'WEATHER'
     if (slug.includes('HELLO')) return 'COLD_OPEN'
 
+    // 第二步：Parts 组合推断
     const hasCAM = parts.some(p => p.type === PartType.KAM)
     const hasVT = parts.some(p => p.type === PartType.SERVER)
     const hasVO = parts.some(p => p.type === PartType.VO)
@@ -151,6 +177,17 @@ function getStoryDisplayType(segment: ISegment): StoryDisplayType {
 
     return 'UNKNOWN'
 }
+
+// ─── Part 类型标签样式 ────────────────────────────────────────────────────────
+
+/* const PART_TYPE_STYLE: Record<string, { color: string; bg: string; border: string }> = {
+    [PartType.KAM]: { color: '#6baaf5', bg: 'rgba(37,99,235,.18)', border: 'rgba(37,99,235,.35)' },
+    [PartType.SERVER]: { color: '#b09af0', bg: 'rgba(124,58,237,.18)', border: 'rgba(124,58,237,.35)' },
+    [PartType.VO]: { color: '#5ec48a', bg: 'rgba(5,150,105,.18)', border: 'rgba(5,150,105,.35)' },
+    [PartType.LIVE]: { color: '#f87171', bg: 'rgba(220,38,38,.18)', border: 'rgba(220,38,38,.35)' },
+    [PartType.GRAPHICS]: { color: '#f5b944', bg: 'rgba(217,119,6,.18)', border: 'rgba(217,119,6,.35)' },
+    [PartType.UNKNOWN]: { color: '#6a7d92', bg: 'rgba(106,125,146,.12)', border: 'rgba(106,125,146,.25)' },
+} */
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -225,48 +262,16 @@ export interface RundownListProps {
 export default function RundownListView({ rundown, runtime, disabled, onSetNext }: RundownListProps) {
     injectAnimations()
     const rows = useMemo(() => buildStoryRows(rundown), [rundown])
-
-    // ── 所有 hooks 在顶层 ──────────────────────────────────────────
-    const [isAutoFollow, setIsAutoFollow] = useState(true)
-    const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-    const onAirRowRef        = useRef<HTMLDivElement | null>(null)
-    const prevOnAirPartId = useRef<string | null>(null)
+    const onAirRef = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
-        if (!runtime?.onAirPartId) return
-    
-        // 只有 onAirPartId 真正变化时（即发生了 TAKE），才重置磁吸
-        if (runtime.onAirPartId !== prevOnAirPartId.current) {
-            prevOnAirPartId.current = runtime.onAirPartId
-            setIsAutoFollow(true)
-        }
-        if (!isAutoFollow) return
-        if (!onAirRowRef.current || !scrollContainerRef.current) return
-    
-        const container = scrollContainerRef.current
-        const row       = onAirRowRef.current
-        const targetTop = row.offsetTop - container.offsetTop
-        const startTop  = container.scrollTop
-        const distance  = targetTop - startTop
-        const duration  = 800
-        const startTime = performance.now()
-    
-        const animate = (currentTime: number) => {
-            const elapsed  = currentTime - startTime
-            const progress = Math.min(elapsed / duration, 1)
-            const ease     = progress < 0.5
-                ? 2 * progress * progress
-                : 1 - Math.pow(-2 * progress + 2, 2) / 2
-            container.scrollTop = startTop + distance * ease
-            if (progress < 1) requestAnimationFrame(animate)
-        }
-    
-        requestAnimationFrame(animate)
-    }, [runtime?.onAirPartId, isAutoFollow])
+        if (onAirRef.current)
+            onAirRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, [runtime?.onAirPartId])
 
     const stats = useMemo(() => {
         const allParts = rows.flatMap(r => r.parts)
-        const totalMs  = allParts.reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+        const totalMs = allParts.reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
         const onAirIdx = runtime?.onAirPartId
             ? allParts.findIndex(p => (p._id as string) === runtime.onAirPartId)
             : -1
@@ -280,51 +285,18 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: C.bgBase }}>
             <ColumnHeader />
-            {!isAutoFollow && runtime?.onAirPartId && (
-                <div
-                    onClick={() => setIsAutoFollow(true)}
-                    style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        gap: 6, height: 24,
-                        background: 'rgba(138,106,0,0.15)',
-                        borderBottom: '1px solid rgba(138,106,0,0.3)',
-                        cursor: 'pointer', fontFamily: C.mono, fontSize: 9,
-                        fontWeight: 700, letterSpacing: '0.1em',
-                        color: '#e0b830', flexShrink: 0,
-                    }}
-                >
-                    ⚓ 手动模式 — 点击恢复自动跟随
-                </div>
-            )}
-
-            {/* ── 滚动容器：ref + onScroll 都在这个 div 上 ── */}
-            <div
-                ref={scrollContainerRef}
-                    onWheel={() => setIsAutoFollow(false)}
-                    onTouchMove={() => setIsAutoFollow(false)}
-                style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${C.borderStrong} transparent` }}
-            >
+            <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${C.borderStrong} transparent` }}>
                 {rows.length === 0 ? <EmptyState /> : rows.map((row, idx) => {
                     const onAirSegIdx = rows.findIndex(r =>
                         r.parts.some(p => (p._id as string) === runtime?.onAirPartId)
                     )
-                    const isOnAir   = idx === onAirSegIdx
-                    const previewSegIdx = rows.findIndex(r =>
-                        r.parts.some(p => (p._id as string) === runtime?.previewPartId)
-                    )
-                    
-                    const isPreview = !isOnAir && (
-                        // RUN之后，没有onAir，直接用previewPartId所在行
-                        (onAirSegIdx === -1 && previewSegIdx === idx && runtime?.previewPartId != null)
-                        ||
-                        // 正常播出中
-                        (onAirSegIdx >= 0 && (
-                            previewSegIdx === idx
-                            || (previewSegIdx === -1 && idx === onAirSegIdx + 1)
-                            || (previewSegIdx === onAirSegIdx && idx === onAirSegIdx + 1)
-                        ))
-                    )
-                    const isNext   = false
+                    const isOnAir = idx === onAirSegIdx
+                    const isPreview = onAirSegIdx >= 0 
+                        ? idx === onAirSegIdx + 1
+                        : rows.some((r, i) => i === idx && r.parts.some(p => (p._id as string) === runtime?.previewPartId))
+                    const isNext = false
+
+                    // 已播：ON AIR 故事之前的所有故事
                     const isPlayed = onAirSegIdx >= 0 && idx < onAirSegIdx
 
                     return (
@@ -339,7 +311,7 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
                             onSetNext={onSetNext}
                             runtime={runtime}
                             rundown={rundown}
-                            ref={isOnAir ? onAirRowRef : null}
+                            ref={isOnAir ? onAirRef : null}
                         />
                     )
                 })}
@@ -358,10 +330,9 @@ function ColumnHeader() {
         </div>
     )
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: '80px 160px 1fr 56px 64px', padding: '0 8px', height: 26, alignItems: 'center', background: C.bgSurface, borderBottom: `1px solid ${C.borderStrong}`, flexShrink: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 160px 1fr 56px 64px', borderLeft: '3px solid transparent', padding: '0 8px', height: 26, alignItems: 'center', background: C.bgSurface, borderBottom: `1px solid ${C.borderStrong}`, flexShrink: 0 }}>
             {col('PG', 'center')}
             {col('SLUG', 'center')}
-            {col('', 'left')}
             {col('DUR', 'right')}
             {col('BACK', 'right')}
         </div>
@@ -371,48 +342,28 @@ function ColumnHeader() {
 // ─── Story 行 ─────────────────────────────────────────────────────────────────
 
 interface StoryRowItemProps {
-    row: StoryRow
-    isOnAir: boolean
+    row:       StoryRow
+    isOnAir:   boolean
     isPreview: boolean
-    isNext: boolean
-    isPlayed: boolean
-    disabled: boolean
+    isNext:    boolean
+    isPlayed:  boolean
+    disabled:  boolean
     onSetNext: (partId: string) => void
-    runtime: RundownRuntime | null
-    rundown: IRundown
+    runtime:   RundownRuntime | null
+    rundown:   IRundown
 }
 
 const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
-    ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled }, ref) => {
+    ({ row, isOnAir, isPreview, isNext, isPlayed, runtime }, ref) => {
         const [hovered, setHovered] = useState(false)
-        const lastClickTime = useRef<number>(0)
-        const { segment, parts, pgLabel, totalDurMs, backTimeMs } = row
+        const { segment, parts, pgLabel, totalDurMs, backTimeMs } = row            
+        const leftBorder = isOnAir ? C.pgmBorder : isPreview ? C.pvwBorder : isNext ? C.nxtBorder : 'transparent'
+        const pgColor = isOnAir ? '#FFFFFF' : isPreview ? '#FFFFFF' : isNext ? C.nxtFade : C.textDim
+        const durColor = isOnAir ? '#FFFFFF' : isPreview ? '#FFFFFF' : isNext ? C.nxtText : C.textSec
+        const backColor = isOnAir ? '#FFFFFF' : isPreview ? '#FFFFFF' : isNext ? 'rgba(200,154,0,.35)' : C.textDim
+        const rowBorder = isOnAir ? 'rgba(192,57,43,.25)' : isPreview ? 'rgba(30,132,73,.18)' : isNext ? 'rgba(138,106,0,.18)' : 'rgba(30,37,48,.7)'
 
-        const rowBorder = isOnAir ? 'rgba(248,7,29,.3)'
-            : isPreview ? 'rgba(10,194,66,.25)'
-                : isNext ? 'rgba(138,106,0,.18)'
-                    : 'rgba(30,37,48,.7)'
-
-        const textColor = isOnAir || isPreview ? '#FFFFFF'
-            : isNext ? C.nxtText
-                : C.textSec
-
-        // ── 纯色底 ──────────────────────────────────────────────────────────
-        const rowBg = isOnAir
-            ? 'rgb(180, 0, 21)'    // 纯红
-            : isPreview
-                ? 'rgb(0,155,60)'    // 纯绿
-                : isPlayed
-                    ? '#999999'          // 已播：更暗的灰，明显区别
-                    : hovered
-                        ? '#484848'          // hover
-                        : '#a6a6a6'          // 未播：标准灰
-
-        // ── 遮罩：所有行统一，只做顶部高光 + 底部变暗 ──────────────────────
-        const overlayGradient =
-            'linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.0) 35%, rgba(0,0,0,0.7) 100%)'
-
-            return (
+        return (
             <div
                 ref={ref}
                 style={{
@@ -420,134 +371,130 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     gridTemplateColumns: '80px 160px 1fr 56px 64px',
                     padding: '0 8px',
                     alignItems: 'center',
-                    background: rowBg,
-                    position: 'relative',
+                    justifyContent: 'center',
+                    background: isOnAir
+                        ? 'linear-gradient(180deg,rgb(206, 0, 24) 0%,rgb(75, 0, 9) 70%, rgb(43, 0, 5) 100%)'
+                        : isPreview
+                        ? 'linear-gradient(180deg,rgb(0, 195, 91) 0%,rgb(0, 56, 25) 70%, rgb(0, 22, 10) 100%)'
+                        : hovered && !isPlayed
+                        ? 'linear-gradient(180deg, #2a2f38 0%, #1a1f26 100%)'
+                        : 'linear-gradient(180deg,rgb(142, 142, 142) 0%,rgba(27, 27, 27, 0.94) 100%)',
                     borderRadius: 3,
-                    borderLeft: `none`,
+                    borderLeft: `3px solid ${leftBorder}`,
                     borderBottom: `1px solid ${rowBorder}`,
+                    // 顶部高光线，模拟立体感
                     marginBottom: 2,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-                    opacity: isPlayed ? 0.5 : 1,
+                    boxShadow: isOnAir
+                        ? '0 2px 6px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.08) inset'
+                        : isPreview
+                        ? '0 2px 6px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.08) inset'
+                        : '0 2px 4px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.06) inset',
+                    borderTop: isOnAir
+                        ? '1px solid rgba(255,255,255,0.12)'
+                        : isPreview
+                        ? '1px solid rgba(255,255,255,0.10)'
+                        : '1px solid rgba(255,255,255,0.05)',
+                    opacity: 1,
                     transition: 'background 0.08s',
                 }}
                 onMouseEnter={() => setHovered(true)}
                 onMouseLeave={() => setHovered(false)}
-                onDoubleClick={() => console.log('row double click')}
             >
+
                 {/* PG */}
-                <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    position: 'relative', zIndex: 1,
+                <div style={{ 
+                    fontFamily:  C.mono,
+                    fontSize:    18,
+                    color:       pgColor,
+                    textAlign:   'center',
+                    alignSelf:   'center',
+                    justifySelf: 'stretch',  // ← 强制撑满列宽
                 }}>
-                    <div style={{ fontFamily: C.mono, fontSize: 18, color: textColor, textAlign: 'center' }}>
-                        {pgLabel}
-                    </div>
+                    {pgLabel}
                 </div>
 
-                {/* TYPE + SLUG */}
+                {/* TYPE */}
                 {(() => {
-                    const storyType = getStoryDisplayType(segment)
-                    const ts = STORY_TYPE_STYLE[storyType]
-                    return (
-                        <div style={{
-                            display: 'flex', flexDirection: 'column',
-                            height: '100%', overflow: 'hidden',
-                            paddingTop: 2, paddingBottom: 9,
-                            position: 'relative', zIndex: 1,
-                        }}>
-                            <div style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }}>
+                const storyType = getStoryDisplayType(segment)
+                const ts        = STORY_TYPE_STYLE[storyType]
+                return (
+                    <div style={{
+                        display:       'flex',
+                        flexDirection: 'column',
+                        height:        '100%',
+                        overflow:      'hidden',
+                        paddingTop:    2,
+                        paddingBottom: 9,
+                    }}>
+                            {/* 上半：标题 */}
+                            <div style={{
+                                flex:       1,
+                                minHeight:  0,
+                                padding:    '4px 8px',
+                                overflow:   'hidden',
+                                position:   'relative',
+                            }}>
                                 <div style={{
-                                    fontFamily: C.sans, fontSize: 11, fontWeight: 600,
-                                    color: '#FFF', lineHeight: '1.35',
-                                    maxHeight: '4.05em', overflow: 'hidden', wordBreak: 'break-all',
+                                    fontFamily:  C.sans,
+                                    fontSize:    11,
+                                    fontWeight:  600,
+                                    color:       '#FFF',
+                                    lineHeight:  '1.35',
+                                    maxHeight:   '2.7em',    // ← 2行 × 1.35 line-height = 2.7em
+                                    overflow:    'hidden',
+                                    wordBreak:   'break-all',
                                 }}>
                                     {segment.name || segment.externalId}
                                 </div>
                             </div>
+                            {/* 下半：TYPE 填满 */}
                             <div style={{
-                                flexShrink: 0, height: 36,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                background: ts.color,
-                                fontFamily: C.mono, fontSize: 22, fontWeight: 800,
-                                color: '#FFF', letterSpacing: '0.06em', whiteSpace: 'nowrap',
+                                flexShrink:     0,           // ← 改：固定高度，不被压缩
+                                height:         36,          // ← 固定36px，不用百分比
+                                display:        'flex',
+                                alignItems:     'center',
+                                justifyContent: 'center',
+                                background:     ts.color,
+                                fontFamily:     C.mono,
+                                fontSize:       20,
+                                fontWeight:     800,
+                                color:          '#FFF',
+                                letterSpacing:  '0.06em',
+                                whiteSpace:     'nowrap',
                             }}>
                                 <span>{ts.line1}</span>
-                                {ts.line2 && <span style={{ marginLeft: 4 }}>{ts.line2}</span>}
+                                {ts.line2 && <span style={{marginLeft: 4}}>{ts.line2}</span>}
                             </div>
                         </div>
                     )
                 })()}
 
-                {/* 缩略图 */}
-                <div
-                    style={{
-                        display:    'flex',
-                        flexDirection: 'column',
-                        gap:        6,
-                        padding:    '6px 8px',
-                        position:   'relative',
-                        zIndex:     3,
-                        overflowX:  'auto',
-                        overflowY:  'hidden',
-                        cursor:     'grab',
-                        scrollbarWidth: 'none',  // 隐藏滚动条
-                    }}
-                    onMouseDown={(e) => {
-                        const el     = e.currentTarget
-                        const startX = e.pageX - el.scrollLeft
-                        const onMove = (ev: MouseEvent) => {
-                            el.scrollLeft      = ev.pageX - startX
-                            el.style.cursor    = 'grabbing'
-                        }
-                        const onUp = () => {
-                            el.style.cursor = 'grab'
-                            window.removeEventListener('mousemove', onMove)
-                            window.removeEventListener('mouseup',   onUp)
-                        }
-                        window.addEventListener('mousemove', onMove)
-                        window.addEventListener('mouseup',   onUp)
-                    }}
-                >
+                {/* 内容区：视觉缩略图 */}
+                <div style={{
+                    display:       'flex',
+                    flexDirection: 'column',
+                    gap:           6,
+                    padding:       '6px 8px',
+                    minWidth:      0,
+                    justifyContent: 'center',
+                }}>
+
+                    {/* 下层：视觉缩略图横排 */}
                     {parts.length > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {parts.map((part, partIdx) => {
                                 const isPartOnAir   = (part._id as string) === runtime?.onAirPartId
                                 const isPartPreview = (part._id as string) === runtime?.previewPartId
                                 return (
-                                    <div
-                                        key={part._id as string}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 3 }}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => {
-                                            const now = Date.now()
-                                            if (now - lastClickTime.current < 300) {
-                                                !disabled && !isPartOnAir && onSetNext(part._id as string)
-                                                lastClickTime.current = 0
-                                            } else {
-                                                lastClickTime.current = now
-                                            }
-                                        }}
-                                        //onDoubleClick={() => !disabled && !isPartOnAir && onSetNext(part._id as string)}
-                                    >
+                                    <div key={part._id as string} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <ThumbnailPlaceholder
                                             type={part.type}
                                             isOnAir={isPartOnAir}
                                             isPreview={isPartPreview}
                                         />
-                                        {partIdx < parts.length - 1 && (() => {
-                                            const nextPart = parts[partIdx + 1]
-                                            const nextIsPreview = nextPart 
-                                                && (nextPart._id as string) === runtime?.previewPartId
-                                            return (
-                                                <div style={{
-                                                    color:     isPartOnAir ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)',
-                                                    fontSize:  14,
-                                                    animation: (isPartOnAir && nextIsPreview) 
-                                                        ? 'rcas-blink 1s ease-in-out infinite' 
-                                                        : 'none',
-                                                }}>→</div>
-                                            )
-                                        })()}
+                                        {partIdx < parts.length - 1 && (
+                                            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>→</div>
+                                        )}
                                     </div>
                                 )
                             })}
@@ -556,30 +503,14 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                 </div>
 
                 {/* DUR */}
-                <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                    height: 22, position: 'relative', zIndex: 1,
-                }}>
-                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>{fmtMs(totalDurMs)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', height: 22 }}>
+                    <span style={{ fontFamily: C.mono, fontSize: 11, color: durColor }}>{fmtMs(totalDurMs)}</span>
                 </div>
 
                 {/* BACK */}
-                <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                    height: 22, position: 'relative', zIndex: 1,
-                }}>
-                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>{fmtMs(backTimeMs)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', height: 22 }}>
+                    <span style={{ fontFamily: C.mono, fontSize: 11, color: backColor }}>{fmtMs(backTimeMs)}</span>
                 </div>
-
-                {/* ─── 顶层渐变遮罩：所有行统一，只做光照 ─── */}
-                <div style={{
-                    position: 'absolute',
-                    inset: 0,
-                    borderRadius: 3,
-                    background: overlayGradient,
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                }} />
             </div>
         )
     }
@@ -589,11 +520,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
 
 function EmptyState() {
     return (
-        <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            height: 200, fontFamily: C.mono, fontSize: 11, color: C.textDim,
-            letterSpacing: '0.12em', textTransform: 'uppercase',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, fontFamily: C.mono, fontSize: 11, color: C.textDim, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
             NO RUNDOWN DATA
         </div>
     )
@@ -613,11 +540,7 @@ function TotalBar({ stats }: { stats: TotalBarStats }) {
         { lbl: 'ETA', val: stats.remainMs > 0 ? fmtTimeOfDay(stats.expectedEnd) : '—', color: C.textSec },
     ]
     return (
-        <div style={{
-            height: 26, borderTop: `1px solid ${C.borderStrong}`,
-            display: 'flex', alignItems: 'center', padding: '0 10px',
-            background: C.bgSurface, flexShrink: 0, gap: 0,
-        }}>
+        <div style={{ height: 26, borderTop: `1px solid ${C.borderStrong}`, display: 'flex', alignItems: 'center', padding: '0 10px', background: C.bgSurface, flexShrink: 0, gap: 0 }}>
             {items.map((item, i) => (
                 <div key={item.lbl} style={{ display: 'flex', alignItems: 'center' }}>
                     {i > 0 && <div style={{ width: 1, height: 12, background: C.borderMid, margin: '0 10px' }} />}

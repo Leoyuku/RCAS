@@ -212,8 +212,14 @@ export const useRCASStore = create<RCASStore>((set) => ({
     },
 
     setNext: (partId: string) => {
-        if (!socket) return
+        console.log('[Store] setNext called with:', partId)
+        if (!socket) {
+            console.log('[Store] socket is null!')  // ← 加这行
+            return
+        }
+        console.log('[Store] emitting intent:setNext')  // ← 加这行
         socket.emit('intent:setNext', { partId }, (result) => {
+            console.log('[Store] setNext result:', result)  // ← 加这行
             if (!result?.ok) console.error('[Socket] SET NEXT failed:', result?.error)
         })
     },
