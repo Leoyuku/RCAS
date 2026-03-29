@@ -1,0 +1,74 @@
+{
+    "activeDevices": {
+        "switcher": "tricaster-1",
+        "videoServer": null,
+        "vizEngine": null
+    },
+    "devices": {
+        "tricaster-1": {
+            "type": "tricaster",
+            "role": "switcher",
+            "label": "主演播室 Tricaster",
+            "capabilities": {
+                "canReceiveDDR": true,
+                "canReceiveInput": true,
+                "livePreview": true,
+                "tally": true,
+                "datalink": true,
+                "dsk": true,
+                "dskLayers": 4
+            },
+            "connection": {
+                "host": "192.168.17.159",
+                "port": 80
+            }
+        }
+    },
+    "sources": {
+        "CAM1": {
+            "id": "CAM1",
+            "label": "1号机",
+            "type": "camera",
+            "previewSrc": "input1",
+            "programSrc": "input1"
+        },
+        "CAM2": {
+            "id": "CAM2",
+            "label": "2号机",
+            "type": "camera",
+            "previewSrc": "input2",
+            "programSrc": "input2"
+        },
+        "VT_A": {
+            "id": "VT_A",
+            "label": "视频A路",
+            "type": "vt",
+            "previewSrc": "input7",
+            "programSrc": "input7"
+        },
+        "VT_B": {
+            "id": "VT_B",
+            "label": "视频B路",
+            "type": "vt",
+            "previewSrc": "input8",
+            "programSrc": "input8"
+        }
+    },
+    "defaultSources": {
+    "kam":    "CAM1",
+    "server": "VT_A",
+    "vo":     "VT_A",
+    "live":   "CAM1"
+    },
+    "dskMapping": {
+        "L3RD": 1,
+        "BUG": 2,
+        "SPARE1": 3,
+        "SPARE2": 4
+    },
+    "l3rd": {
+        "delayIn": 500,
+        "duration": 8000
+    },
+    "presets": {}
+}

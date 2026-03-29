@@ -74,12 +74,25 @@ const STORY_TYPE_STYLE: Record<StoryDisplayType, StoryTypeStyle> = {
 
 // ─── 画面占位符 ───────────────────────────────────────────────────────────────
 
-function ThumbnailPlaceholder({ type, isOnAir, isPreview }: {
+function ThumbnailPlaceholder({ type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false }: {
     type: string
     isOnAir: boolean
     isPreview: boolean
+    proxyUrl?: string | null
+    airStatus?: string | null
+    frameUrl?: string | null
+    isOverride?: boolean
 }) {
-    const isCAM = type === PartType.KAM
+    // ── 语义判断（UI 层不直接使用 KAM 等 MOS 术语）──────────────────────────
+    const isCamera = type === PartType.KAM
+    const isVideoServer = type === PartType.SERVER || type === PartType.VO
+    const isNotReady = airStatus === 'NOT READY'
+
+    // ── 显示内容决策 ──────────────────────────────────────────────────────────
+    const showCameraFrame = isCamera && !!frameUrl
+    const showProxyImage = isVideoServer && !isNotReady && !!proxyUrl
+    const showNotReady = isVideoServer && isNotReady
+    const showPlaceholder = !showCameraFrame && !showProxyImage && !showNotReady
 
     return (
         <div style={{
@@ -93,29 +106,100 @@ function ThumbnailPlaceholder({ type, isOnAir, isPreview }: {
             justifyContent: 'center',
             flexShrink: 0,
             position: 'relative',
-            //boxShadow: '0 0 0 1px rgba(255,255,255,0.08)',
+            overflow: 'hidden',
+            // ── 源代码原有的 boxShadow 逻辑，完全保留 ──
             boxShadow: isOnAir
-                ? '0 0 0 3px #f8071d, 0 0 12px 3px rgba(248,7,29,1)'
+                ? '0 0 0 4px #f8071d, 0 0 12px 3px rgb(251, 255, 0)'
                 : isPreview
-                ? '0 0 0 3px #0ac242, 0 0 12px 3px rgba(10,194,66,1)'
-                : '0 0 0 1px rgba(255,255,255,0.08)',
+                    ? '0 0 0 4px rgb(10, 194, 99), 0 0 12px 3px rgb(251, 255, 0)'
+                    : isNotReady
+                        ? '0 0 0 2px rgb(255,140,0)'
+                        : '0 0 0 1px rgba(255,255,255,0.08)',
         }}>
-            <div style={{
-                fontSize: 24,
-                opacity: isOnAir || isPreview ? 0.3 : 0.18,
-                marginBottom: 4,
-            }}>
-                {isCAM ? '🎥' : '▶'}
-            </div>
-            <div style={{
-                fontFamily: C.mono,
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.1em',
-                color: 'rgba(255,255,255,0.2)',
-            }}>
-                {isCAM ? 'CAM' : 'VT/VO'}
-            </div>
+
+            {/* ── CAM 实时帧 ── */}
+            {showCameraFrame && (
+                <img
+                    src={frameUrl!}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 2 }}
+                    alt="camera preview"
+                />
+            )}
+
+            {/* ── 视频素材缩略图（源代码原有逻辑，保留 onError 处理）── */}
+            {showProxyImage && (
+                <img
+                    src={proxyUrl!}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 2 }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    alt="clip thumbnail"
+                />
+            )}
+
+            {/* ── NOT READY 警告 ── */}
+            {showNotReady && (
+                <>
+                    <div style={{
+                        fontSize: 18,
+                        opacity: 0.9,
+                        marginBottom: 4,
+                    }}>
+                        ⚠️
+                    </div>
+                    <div style={{
+                        fontFamily: C.mono,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: 'rgb(255,140,0)',
+                    }}>
+                        NOT READY
+                    </div>
+                </>
+            )}
+
+            {/* ── 通用占位符（源代码原有逻辑，完全保留）── */}
+            {showPlaceholder && (
+                <>
+                    <div style={{
+                        fontSize: 24,
+                        opacity: isOnAir || isPreview ? 0.3 : 0.18,
+                        marginBottom: 4,
+                    }}>
+                        {isCamera ? '🎥' : '▶'}
+                    </div>
+                    <div style={{
+                        fontFamily: C.mono,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.1em',
+                        color: 'rgba(255,255,255,0.2)',
+                    }}>
+                        {isCamera ? 'CAM' : 'VT/VO'}
+                    </div>
+                </>
+            )}
+
+            {/* ── 运行时覆盖角标 ── */}
+            {isOverride && (
+                <div style={{
+                    position: 'absolute',
+                    top: 3,
+                    right: 3,
+                    background: 'rgb(255,140,0)',
+                    color: '#000',
+                    fontFamily: C.mono,
+                    fontSize: 8,
+                    fontWeight: 700,
+                    padding: '1px 4px',
+                    borderRadius: 2,
+                    letterSpacing: '0.06em',
+                    pointerEvents: 'none',
+                }}>
+                    OVR
+                </div>
+            )}
+
         </div>
     )
 }
@@ -452,7 +536,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                         <div style={{
                             display: 'flex', flexDirection: 'column',
                             height: '100%', overflow: 'hidden',
-                            paddingTop: 2, paddingBottom: 9,
+                            paddingTop: 2, paddingBottom: 7,
                             position: 'relative', zIndex: 1,
                         }}>
                             <div style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }}>
@@ -490,7 +574,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                         overflowX:  'auto',
                         overflowY:  'hidden',
                         cursor:     'grab',
-                        scrollbarWidth: 'none',  // 隐藏滚动条
+                        scrollbarWidth: 'none',
                     }}
                     onMouseDown={(e) => {
                         const el     = e.currentTarget
@@ -513,6 +597,17 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                             {parts.map((part, partIdx) => {
                                 const isPartOnAir   = (part._id as string) === runtime?.onAirPartId
                                 const isPartPreview = (part._id as string) === runtime?.previewPartId
+
+                                // ── 找主 Piece，取 proxyUrl 和 airStatus ──────────────────
+                                const mainPiece = part.pieces?.find(p =>
+                                    p.sourceLayerId === 'vt'     ||
+                                    p.sourceLayerId === 'video'  ||
+                                    p.sourceLayerId === 'camera' ||
+                                    p.sourceLayerId === 'vo'
+                                )
+                                const proxyUrl  = mainPiece?.content?.proxyPath  ?? null
+                                const airStatus = mainPiece?.content?.airStatus  ?? null
+
                                 return (
                                     <div
                                         key={part._id as string}
@@ -527,23 +622,26 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 lastClickTime.current = now
                                             }
                                         }}
-                                        //onDoubleClick={() => !disabled && !isPartOnAir && onSetNext(part._id as string)}
                                     >
                                         <ThumbnailPlaceholder
                                             type={part.type}
                                             isOnAir={isPartOnAir}
                                             isPreview={isPartPreview}
+                                            proxyUrl={proxyUrl}
+                                            airStatus={airStatus}
+                                            frameUrl={null}       // CAM 实时帧接入后填入
+                                            isOverride={false}    // 运行时覆盖接入后填入
                                         />
                                         {partIdx < parts.length - 1 && (() => {
-                                            const nextPart = parts[partIdx + 1]
-                                            const nextIsPreview = nextPart 
+                                            const nextPart      = parts[partIdx + 1]
+                                            const nextIsPreview = nextPart
                                                 && (nextPart._id as string) === runtime?.previewPartId
                                             return (
                                                 <div style={{
                                                     color:     isPartOnAir ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)',
                                                     fontSize:  14,
-                                                    animation: (isPartOnAir && nextIsPreview) 
-                                                        ? 'rcas-blink 1s ease-in-out infinite' 
+                                                    animation: (isPartOnAir && nextIsPreview)
+                                                        ? 'rcas-blink 1s ease-in-out infinite'
                                                         : 'none',
                                                 }}>→</div>
                                             )

@@ -308,8 +308,8 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         const commands        = diff(desiredState, this._lastSentState)
 
         if (commands.length > 0) {
-            logger.info(`[RundownEngine] State loop tick: ${commands.length} command(s)`)
-            this.emit('commandsReady', commands)
+            // commandsReady 已废弃，播出指令由 PlayoutController 监听 runtimeChanged 直接处理
+            // 保留 _lastSentState 更新，供未来 Timeline 机制复用
             this._lastSentState = desiredState
         }
     }

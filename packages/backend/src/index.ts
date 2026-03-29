@@ -33,6 +33,9 @@ import { logger }                     from './shared/logger';
 import { config }                     from './shared/config';
 import { runStartupChecks }           from './shared/startup-check';
 import { tricasterDriver } from './modules/4_playout_controllers/tricaster/tricaster-driver'
+import { playoutController } from './modules/4_playout_controllers/playout-controller'
+import { deviceConfigService }  from './modules/4_playout_controllers/config/device-config.service'
+import { deviceConfigRouter }   from './modules/4_playout_controllers/config/device-config.router'
 
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
 
@@ -52,7 +55,16 @@ import { tricasterDriver } from './modules/4_playout_controllers/tricaster/trica
     // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
     rundownStore.init();
     rundownEngine.init();
-    tricasterDriver.init()
+    tricasterDriver.connect()
+    // 加载设备配置
+    const deviceConfig = deviceConfigService.load()
+
+    // 配置变更时热更新 PlayoutController
+    deviceConfigService.onChange((cfg) => playoutController.updateConfig(cfg))
+
+    // 初始化 PlayoutController
+    tricasterDriver.connect()
+    playoutController.init(deviceConfig)
 
     // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
     await rundownStore.restore();
@@ -73,6 +85,7 @@ import { tricasterDriver } from './modules/4_playout_controllers/tricaster/trica
     const app = express();
     app.use(express.json());
     app.use(cors());
+    app.use('/api', deviceConfigRouter)
 
     // ── REST API ───────────────────────────────────────────────────────────────
 

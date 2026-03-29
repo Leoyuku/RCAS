@@ -247,18 +247,20 @@ function buildPieces(item: IMOSItem, partId: string): IPiece[] {
                 outputLayerId: 'pgm',
                 content: {
                     timelineObjects: [],
-                    // 就绪状态
-                    airStatus:    mosObj.AirStatus   ?? null,
-                    objStatus:    mosObj.Status       ?? null,
-                    // 媒体文件路径（Tricaster 播放用）
-                    filePath,       // \\server\media\clip.mov
-                    proxyPath,      // http://server/proxy/clip.mp4
-                    metadataPath,   // http://server/proxy/clip.xml
-                    // mosExternalMetadata payload 原样保留
-                    // playlistPayload 包含: mediaType, source, owner, found, version, metaData(编解码)
+                
+                    // TODO: [联调] 从 mosExternalMetadata mosPayload 解析机位信息
+                    // Octopus 在字幕字段里标注 CAM1/CAM2 等机位，字段位置待真实 MOS 数据确认后填入
+                    // 解析完成后直接写入此字段，PlayoutController 优先读取，defaultSources 自动降为兜底
+                    // 预期示例：sourceId: extractCameraId(playlistPayload) ?? null
+                    sourceId: null,
+                
+                    airStatus:    mosObj.AirStatus ?? null,
+                    objStatus:    mosObj.Status ?? null,
+                    filePath,
+                    proxyPath,
+                    metadataPath,
                     playlistPayload,
                     objectPayload,
-                    // 原始标识
                     mosId,
                     objId: objIdStr,
                 },
@@ -289,7 +291,12 @@ function buildPieces(item: IMOSItem, partId: string): IPiece[] {
         outputLayerId: 'pgm',
         content: {
             timelineObjects: [],
-            airStatus:       null,   // Profile 2 无状态，等 roStorySend 补全
+        
+            // TODO: [联调] 同上，Profile 2 数据较少
+            // 此路径 mosPayload 字段有限，sourceId 可能需要等 roStorySend 补全后再解析
+            sourceId: null,
+        
+            airStatus:       null,
             objStatus:       null,
             filePath,
             proxyPath,
