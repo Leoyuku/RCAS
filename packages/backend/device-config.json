@@ -21,7 +21,8 @@
             "connection": {
                 "host": "192.168.17.159",
                 "port": 80
-            }
+            },
+            "mePreviewMode": "direct"
         }
     },
     "sources": {
@@ -30,35 +31,41 @@
             "label": "1号机",
             "type": "camera",
             "previewSrc": "input1",
-            "programSrc": "input1"
+            "switcherName": "INPUT1"
         },
         "CAM2": {
             "id": "CAM2",
             "label": "2号机",
             "type": "camera",
             "previewSrc": "input2",
-            "programSrc": "input2"
+            "switcherName": "INPUT2"
         },
         "VT_A": {
             "id": "VT_A",
             "label": "视频A路",
             "type": "vt",
             "previewSrc": "input7",
-            "programSrc": "input7"
+            "switcherName": "INPUT7"
         },
         "VT_B": {
             "id": "VT_B",
             "label": "视频B路",
             "type": "vt",
             "previewSrc": "input8",
-            "programSrc": "input8"
+            "switcherName": "INPUT8"
+        },
+        "ME1": {
+            "id": "ME1",
+            "label": "绿幕合成",
+            "type": "me",
+            "meIndex": 1
         }
     },
     "defaultSources": {
-    "kam":    "CAM1",
-    "server": "VT_A",
-    "vo":     "VT_A",
-    "live":   "CAM1"
+        "kam": "CAM1",
+        "server": "VT_A",
+        "vo": "VT_A",
+        "live": "CAM1"
     },
     "dskMapping": {
         "L3RD": 1,

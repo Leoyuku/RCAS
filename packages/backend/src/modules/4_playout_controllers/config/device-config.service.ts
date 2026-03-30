@@ -175,6 +175,7 @@ export class DeviceConfigService {
             activeDevices: {},
             devices: {},
             sources: {},
+            defaultSources: {},
             dskMapping: {},
             l3rd: { delayIn: 500, duration: 8000 },
             presets: {},

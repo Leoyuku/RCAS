@@ -24,6 +24,7 @@ import { rundownEngine } from '../engine/rundown-engine';
 import { Server as HttpServer }             from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { rundownStore }                     from './rundown-store';
+import { runtimeOverrideStore } from '../../4_playout_controllers/runtime-override-store'
 import { logger }                           from '../../../shared/logger';
 import { ServerToClientEvents, ClientToServerEvents } from '../../../../../core-lib/src/socket/socket-contracts';
 
@@ -77,6 +78,12 @@ export class SocketServer {
             const summaries = rundownStore.getAllSummaries();
             // 连接后立即推送全量摘要快照
             socket.emit('snapshot', { summaries });
+
+            // 补推当前覆盖状态
+            const currentOverrides = runtimeOverrideStore.getAll()
+            if (currentOverrides.length > 0) {
+                socket.emit('runtime:overrides', { overrides: currentOverrides })
+            }
 
             // 如果当前有 active/on-air 的 Rundown（runtime-snapshot 恢复的情况）
             // 补推完整数据，前端才能渲染详细列表
@@ -132,6 +139,31 @@ export class SocketServer {
                 const result = rundownEngine.intentSetNext(payload?.partId);
                 if (callback) callback(result);
             });
+
+            // intent: SET PART OVERRIDE
+            socket.on('intent:setPartOverride', (payload, callback) => {
+                logger.info(`[SocketServer] intent:setPartOverride from ${clientID}: part="${payload?.partId}" → source="${payload?.sourceId}"`)
+                if (!payload?.partId || !payload?.sourceId) {
+                    if (callback) callback({ ok: false, error: 'partId and sourceId are required' })
+                    return
+                }
+                runtimeOverrideStore.set(payload.partId, payload.sourceId)
+                // 广播最新覆盖状态给所有客户端（多端同步）
+                this._io.emit('runtime:overrides', { overrides: runtimeOverrideStore.getAll() })
+                if (callback) callback({ ok: true })
+            })
+
+            // intent: CLEAR PART OVERRIDE
+            socket.on('intent:clearPartOverride', (payload, callback) => {
+                logger.info(`[SocketServer] intent:clearPartOverride from ${clientID}: part="${payload?.partId}"`)
+                if (!payload?.partId) {
+                    if (callback) callback({ ok: false, error: 'partId is required' })
+                    return
+                }
+                runtimeOverrideStore.clear(payload.partId)
+                this._io.emit('runtime:overrides', { overrides: runtimeOverrideStore.getAll() })
+                if (callback) callback({ ok: true })
+            })
         });
     }
 

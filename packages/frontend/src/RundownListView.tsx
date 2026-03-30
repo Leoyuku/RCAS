@@ -18,6 +18,8 @@ import type { ISegment } from '../../core-lib/src/models/segment-model'
 import type { IPart } from '../../core-lib/src/models/part-model'
 import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 import { PartType } from '../../core-lib/src/models/enums'
+import { useRCASStore } from './store/useRCASStore'
+import ReactDOM from 'react-dom'
 
 // ─── 颜色系统 ─────────────────────────────────────────────────────────────────
 
@@ -469,6 +471,44 @@ interface StoryRowItemProps {
 const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
     ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled }, ref) => {
         const [hovered, setHovered] = useState(false)
+        // ── 覆盖相关 ──────────────────────────────────────────────────────────────
+        const partOverrides    = useRCASStore(s => s.partOverrides)
+        const setPartOverride  = useRCASStore(s => s.setPartOverride)
+        const clearPartOverride = useRCASStore(s => s.clearPartOverride)
+
+        // 右键菜单状态
+        const [ctxMenu, setCtxMenu] = useState<{
+            partId: string
+            partType: string
+            x: number
+            y: number
+        } | null>(null)
+
+        useEffect(() => {
+            if (!ctxMenu) return
+            const close = () => setCtxMenu(null)
+            window.addEventListener('click', close)
+            return () => window.removeEventListener('click', close)
+        }, [ctxMenu])
+
+        // 按 partType 过滤同类型源
+        const SOURCE_TYPE_MAP: Record<string, string[]> = {
+            [PartType.KAM]:    ['camera'],
+            [PartType.SERVER]: ['vt'],
+            [PartType.VO]:     ['vt'],
+            [PartType.LIVE]:   ['camera'],
+        }
+
+        const sources = useRCASStore(s => s.sources)
+        const AVAILABLE_SOURCES = Object.values(sources)
+
+        const handleContextMenu = (e: React.MouseEvent, part: IPart) => {
+            const partId = part._id as string
+            if (partId === runtime?.onAirPartId) return   // on-air 不响应
+            e.preventDefault()
+            e.stopPropagation()
+            setCtxMenu({ partId, partType: part.type, x: e.clientX, y: e.clientY })
+        }
         const lastClickTime = useRef<number>(0)
         const { segment, parts, pgLabel, totalDurMs, backTimeMs } = row
 
@@ -513,6 +553,10 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
                     opacity: isPlayed ? 0.5 : 1,
                     transition: 'background 0.08s',
+                }}
+                onDragOver={(e) => {
+                    console.log('DRAG OVER')
+                    e.preventDefault()
                 }}
                 onMouseEnter={() => setHovered(true)}
                 onMouseLeave={() => setHovered(false)}
@@ -576,10 +620,18 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                         cursor:     'grab',
                         scrollbarWidth: 'none',
                     }}
+                    
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnter={(e) => e.preventDefault()}
+
                     onMouseDown={(e) => {
+                        // 如果是从源面板拖过来的，不触发滚动逻辑
+                        if (e.buttons !== 1) return
                         const el     = e.currentTarget
                         const startX = e.pageX - el.scrollLeft
+                        let isDragging = false
                         const onMove = (ev: MouseEvent) => {
+                            isDragging = true
                             el.scrollLeft      = ev.pageX - startX
                             el.style.cursor    = 'grabbing'
                         }
@@ -595,24 +647,25 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     {parts.length > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                             {parts.map((part, partIdx) => {
-                                const isPartOnAir   = (part._id as string) === runtime?.onAirPartId
-                                const isPartPreview = (part._id as string) === runtime?.previewPartId
+                                const partId = part._id as string
+                                const isPartOnAir = partId === runtime?.onAirPartId
+                                const isPartPreview = partId === runtime?.previewPartId
+                                const isOverride = partOverrides.has(partId)
 
-                                // ── 找主 Piece，取 proxyUrl 和 airStatus ──────────────────
-                                const mainPiece = part.pieces?.find(p =>
-                                    p.sourceLayerId === 'vt'     ||
-                                    p.sourceLayerId === 'video'  ||
-                                    p.sourceLayerId === 'camera' ||
-                                    p.sourceLayerId === 'vo'
-                                )
-                                const proxyUrl  = mainPiece?.content?.proxyPath  ?? null
-                                const airStatus = mainPiece?.content?.airStatus  ?? null
+                                // 从 pieces 里取主 Piece 的数据
+                                const mainPiece = part.pieces?.find(p => {
+                                    if (part.type === PartType.KAM) return p.sourceLayerId === 'camera'
+                                    if (part.type === PartType.SERVER) return p.sourceLayerId === 'video'
+                                    if (part.type === PartType.VO) return p.sourceLayerId === 'vo'
+                                    return true
+                                }) ?? part.pieces?.[0] ?? null
 
                                 return (
                                     <div
-                                        key={part._id as string}
+                                        key={partId}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 3 }}
                                         onMouseDown={(e) => e.stopPropagation()}
+                                        onContextMenu={(e) => handleContextMenu(e, part)}
                                         onClick={() => {
                                             const now = Date.now()
                                             if (now - lastClickTime.current < 300) {
@@ -623,33 +676,97 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                             }
                                         }}
                                     >
-                                        <ThumbnailPlaceholder
-                                            type={part.type}
-                                            isOnAir={isPartOnAir}
-                                            isPreview={isPartPreview}
-                                            proxyUrl={proxyUrl}
-                                            airStatus={airStatus}
-                                            frameUrl={null}       // CAM 实时帧接入后填入
-                                            isOverride={false}    // 运行时覆盖接入后填入
-                                        />
-                                        {partIdx < parts.length - 1 && (() => {
-                                            const nextPart      = parts[partIdx + 1]
-                                            const nextIsPreview = nextPart
-                                                && (nextPart._id as string) === runtime?.previewPartId
-                                            return (
-                                                <div style={{
-                                                    color:     isPartOnAir ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)',
-                                                    fontSize:  14,
-                                                    animation: (isPartOnAir && nextIsPreview)
-                                                        ? 'rcas-blink 1s ease-in-out infinite'
-                                                        : 'none',
-                                                }}>→</div>
-                                            )
-                                        })()}
+                                        {/* 拖拽目标层，包裹 ThumbnailPlaceholder */}
+                                        <div
+                                            onDragOver={(e) => {
+                                                if (partId === runtime?.onAirPartId) return
+                                                e.preventDefault()
+                                                e.dataTransfer.dropEffect = 'copy'
+                                                console.log('DRAG OVER thumbnail')
+                                            }}
+                                            onDrop={(e) => {
+                                                if (partId === runtime?.onAirPartId) return
+                                                e.preventDefault()
+                                                const sourceId = e.dataTransfer.getData('sourceId')
+                                                console.log('DROP', sourceId)
+                                                if (!sourceId) return
+                                                const droppedSource = Object.values(sources).find(s => s.id === sourceId)
+                                                if (!droppedSource) return
+                                                const allowedTypes = SOURCE_TYPE_MAP[part.type] ?? []
+                                                if (!allowedTypes.includes(droppedSource.type)) return
+                                                setPartOverride(partId, sourceId)
+                                            }}
+                                            style={{ position: 'relative', display: 'inline-block' }}
+                                        >
+                                            <ThumbnailPlaceholder
+                                                type={part.type}
+                                                isOnAir={isPartOnAir}
+                                                isPreview={isPartPreview}
+                                                proxyUrl={mainPiece?.content?.proxyPath ?? null}
+                                                frameUrl={null} // 待 /api/preview/frame 实现后接入
+                                                airStatus={mainPiece?.content?.airStatus ?? null}
+                                                isOverride={isOverride}
+                                            />
+                                        </div>
+                                        {partIdx < parts.length - 1 && (
+                                            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>→</div>
+                                        )}
                                     </div>
                                 )
-                            })}
+                                })}
                         </div>
+                    )}
+
+                    {/* 右键菜单 */}
+                    {ctxMenu && typeof document !== 'undefined' && ReactDOM.createPortal(
+                        <div
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                                position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 9999,
+                                background: '#1a1f28', border: '1px solid #2d3848', borderRadius: 4,
+                                padding: '4px 0', minWidth: 148,
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
+                                fontFamily: C.mono, fontSize: 11,
+                            }}
+                        >
+                            {AVAILABLE_SOURCES
+                                .filter(s => (SOURCE_TYPE_MAP[ctxMenu.partType] ?? []).includes(s.type))
+                                .map(source => {
+                                    const isSelected = partOverrides.get(ctxMenu.partId) === source.id
+                                    return (
+                                        <div
+                                            key={source.id}
+                                            onClick={() => { setPartOverride(ctxMenu.partId, source.id); setCtxMenu(null) }}
+                                            style={{
+                                                padding: '5px 12px', cursor: 'pointer',
+                                                color: isSelected ? 'rgb(255,140,0)' : '#dde4ee',
+                                                background: isSelected ? 'rgba(255,140,0,0.1)' : 'transparent',
+                                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                            }}
+                                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(255,140,0,0.1)' : 'transparent' }}
+                                        >
+                                            <span>{isSelected ? '✓ ' : ''}{source.label}</span>
+                                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 9, marginLeft: 8 }}>{source.id}</span>
+                                        </div>
+                                    )
+                                })
+                            }
+                            {partOverrides.has(ctxMenu.partId) && (
+                                <>
+                                    <div style={{ height: 1, background: '#2d3848', margin: '4px 0' }} />
+                                    <div
+                                        onClick={() => { clearPartOverride(ctxMenu.partId); setCtxMenu(null) }}
+                                        style={{ padding: '5px 12px', cursor: 'pointer', color: 'rgb(255,140,0)' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                        清除覆盖
+                                    </div>
+                                </>
+                            )}
+                        </div>,
+                        document.body
                     )}
                 </div>
 

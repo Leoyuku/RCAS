@@ -37,6 +37,9 @@ export interface ServerToClientEvents {
     'rundown:standby':   (payload: { id: string }) => void;
     'runtime:state': (payload: RundownRuntime) => void;
     'rundown:lifecycle': (payload: { id: string; lifecycle: LifecycleStatus }) => void;
+    'runtime:overrides': (payload: {
+        overrides: Array<{ partId: string; sourceId: string; createdAt: number }>
+    }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -49,6 +52,15 @@ export interface ClientToServerEvents {
     'intent:take':          (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:sendToPreview': (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:setNext':       (payload: { partId: string }, callback?: (result: { ok: boolean; error?: string }) => void) => void;
+    'intent:setPartOverride': (
+        payload: { partId: string; sourceId: string },
+        callback?: (result: { ok: boolean; error?: string }) => void
+    ) => void;
+
+    'intent:clearPartOverride': (
+        payload: { partId: string },
+        callback?: (result: { ok: boolean; error?: string }) => void
+    ) => void;
 }
 
 // ─── Runtime Engine 状态 ─────────────────────────────────────────────────────

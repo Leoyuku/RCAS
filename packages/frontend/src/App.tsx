@@ -23,9 +23,9 @@ const COLOR = {
     next:    '#F39C12',
     gray:    '#7F8C8D',
     blue:    '#0F3460',
-    bgDark:  '#0D0D0D',
-    bgPanel: '#131313',
-    bgRow:   '#1A1A1A',
+    bgDark:  '#1C1C1C',
+    bgPanel: '#222222',
+    bgRow:   '#272727',
     border:  '#2A2A2A',
     text:    '#E8E8E8',
     textDim: '#666',
@@ -86,7 +86,10 @@ export default function App() {
     const hasRundown = activeRundown !== null
 
     return (
-        <div style={{
+        <div 
+        onDragOver={(e) => { e.preventDefault(); console.log('ROOT DRAG OVER') }}
+        onDrop={(e) => { e.preventDefault(); console.log('ROOT DROP', e.dataTransfer.getData('sourceId')) }}
+        style={{
             display:       'flex',
             flexDirection: 'column',
             height:        '100vh',
@@ -584,28 +587,188 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 
 function RightPanel() {
+    const { sources } = useRCASStore()
+    const [activeTab, setActiveTab] = useState<string>('camera')
+    const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+
+    // 按 type 分组，动态生成 Tab 列表
+    const TAB_LABELS: Record<string, string> = {
+        camera: 'CAM',
+        vt:     'Clip',
+        me:     'M/E',
+    }
+
+    // 从 sources 里提取出现过的类型，按固定顺序排列
+    const TAB_ORDER = ['camera', 'vt', 'me']
+    const availableTypes = TAB_ORDER.filter(type =>
+        Object.values(sources).some(s => s.type === type)
+    )
+
+    // 当前 Tab 的源列表
+    const currentSources = Object.values(sources).filter(s => s.type === activeTab)
+
     return (
         <div style={{
-            display:       'flex',
+            display: 'flex',
             flexDirection: 'column',
-            height:        '100%',
-            overflow:      'hidden',
+            height: '100%',
+            overflow: 'hidden',
         }}>
             {/* ── 监看画面区（PVW 左 / PGM 右）── */}
             <div style={{
-                display:             'grid',
+                display: 'grid',
                 gridTemplateColumns: '1fr 1fr',
-                gap:                 1,
-                background:          COLOR.border,
-                borderBottom:        `1px solid ${COLOR.border}`,
-                flexShrink:          0,
+                gap: 1,
+                background: COLOR.border,
+                borderBottom: `1px solid ${COLOR.border}`,
+                flexShrink: 0,
             }}>
                 <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
                 <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
             </div>
 
-            {/* 空白区域，等待后续功能 */}
-            <div style={{ flex: 1 }} />
+            {/* ── 源面板 ── */}
+            <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+            }}>
+                {/* Tab 标签栏 */}
+                <div style={{
+                    display: 'flex',
+                    borderBottom: `1px solid ${COLOR.border}`,
+                    flexShrink: 0,
+                    background: '#0A0A0A',
+                }}>
+                    {availableTypes.length === 0 ? (
+                        <div style={{
+                            padding: '8px 12px',
+                            fontSize: 10,
+                            color: COLOR.textDim,
+                            fontFamily: '"JetBrains Mono", monospace',
+                        }}>
+                            加载中...
+                        </div>
+                    ) : availableTypes.map(type => (
+                        <div
+                            key={type}
+                            onClick={() => setActiveTab(type)}
+                            style={{
+                                padding: '7px 16px',
+                                fontSize: 11,
+                                fontWeight: activeTab === type ? 700 : 400,
+                                color: activeTab === type ? COLOR.text : COLOR.textDim,
+                                background: activeTab === type ? '#2A2A2A' : '#0A0A0A',  // ← 激活背景更亮
+                                borderTop: activeTab === type ? `2px solid ${COLOR.pvw}` : '2px solid transparent',
+                                borderRight: `1px solid ${activeTab === type ? COLOR.border : 'transparent'}`,
+                                borderLeft: `1px solid ${activeTab === type ? COLOR.border : 'transparent'}`,
+                                borderBottom: activeTab === type ? '1px solid #2A2A2A' : 'none',
+                                marginBottom: activeTab === type ? '-1px' : '0',
+                                cursor: 'pointer',
+                                fontFamily: '"JetBrains Mono", monospace',
+                                letterSpacing: '0.06em',
+                                userSelect: 'none',
+                            }}
+                        >
+                            {TAB_LABELS[type] ?? type.toUpperCase()}
+                        </div>
+                    ))}
+                </div>
+
+                {/* 临时拖拽测试区 */}
+                <div
+                    onDragOver={(e) => { e.preventDefault(); console.log('TEST DRAG OVER') }}
+                    onDrop={(e) => { e.preventDefault(); console.log('TEST DROP', e.dataTransfer.getData('sourceId')) }}
+                    style={{
+                        height: 60,
+                        background: 'red',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontSize: 12,
+                    }}
+                >
+                    拖到这里测试
+                </div>
+
+                {/* Tab 内容区：源卡片 */}
+                <div style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: 6,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignContent: 'flex-start',
+                    gap: 6,
+                }}>
+                    {currentSources.length === 0 ? (
+                        <div style={{
+                            width: '100%',
+                            textAlign: 'center',
+                            color: COLOR.textDim,
+                            fontSize: 11,
+                            marginTop: 24,
+                            fontFamily: '"JetBrains Mono", monospace',
+                        }}>
+                            无可用源
+                        </div>
+                    ) : currentSources.map(source => (
+                        <div
+                            key={source.id}
+                            draggable
+                            onClick={() => setSelectedSourceId(source.id)}
+                            onDragStart={(e) => {
+                                console.log('DRAG START', source.id)
+                                e.dataTransfer.setData('sourceId', source.id)
+                                e.dataTransfer.effectAllowed = 'copy'
+                            }}
+                            style={{
+                                width: '120px',
+                                aspectRatio: '16/9',
+                                background: selectedSourceId === source.id ? '#3A3A3A' : '#1C1C1C',
+                                border: `1px solid ${selectedSourceId === source.id ? COLOR.pvw : COLOR.border}`,
+                                borderRadius: 3,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'grab',
+                                position: 'relative',
+                                overflow: 'hidden',
+                            }}
+                        >
+                            {/* 源类型图标 */}
+                            <div style={{
+                                fontSize: 14,
+                                marginBottom: 4,
+                                opacity: 0.4,
+                            }}>
+                                {source.type === 'camera' ? '📷' : source.type === 'vt' ? '▶' : '🎬'}
+                            </div>
+                            {/* 源 ID */}
+                            <div style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: COLOR.text,
+                                fontFamily: '"JetBrains Mono", monospace',
+                                letterSpacing: '0.06em',
+                            }}>
+                                {source.id}
+                            </div>
+                            {/* 源标签 */}
+                            <div style={{
+                                fontSize: 9,
+                                color: COLOR.textDim,
+                                marginTop: 2,
+                            }}>
+                                {source.label}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     )
 }

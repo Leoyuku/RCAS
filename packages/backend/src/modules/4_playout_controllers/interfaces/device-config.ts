@@ -70,14 +70,15 @@ export type DeviceConfig = SwitcherConfig | VideoServerConfig | GraphicsConfig
 // ─── 源（Source）配置 ────────────────────────────────────────────────────────────
 // 逻辑源：PlayoutController 只操作逻辑源 ID，不直接写物理口
 
-export type SourceType = 'camera' | 'vt' | 'graphics' | 'remote' | 'other'
+export type SourceType = 'camera' | 'vt' | 'me' | 'graphics' | 'remote' | 'other'
 
 export interface SourceConfig {
-    id: string      // 逻辑源 ID，如 'CAM1'、'VT_A'
-    label: string      // 人类可读名称
+    id: string
+    label: string
     type: SourceType
-    previewSrc: string      // 切换台预监对应的物理输入口 ID
-    programSrc: string      // 切换台播出对应的物理输入口 ID
+    previewSrc?: string      // camera/vt 类有；me 类没有，改为可选
+    switcherName?: string    // shortcut value 用；me 类没有，改为可选
+    meIndex?: number         // me 类专用
 }
 
 // ─── DSK 映射 ─────────────────────────────────────────────────────────────────

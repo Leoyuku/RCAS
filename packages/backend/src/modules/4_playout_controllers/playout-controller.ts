@@ -25,6 +25,7 @@ import type { IPart } from '../../../../core-lib/src/models/part-model'
 import type { IPiece } from '../../../../core-lib/src/models/piece-model'
 import type { DeviceConfigFile, SourceConfig, L3rdConfig } from './interfaces/device-config'
 import { PartType } from '../../../../core-lib/src/models/enums'
+import { runtimeOverrideStore } from './runtime-override-store'
 
 // ─── 意图对象：PlayoutController 内部用，标准化 Part 的播出需求 ────────────────
 
@@ -164,17 +165,24 @@ export class PlayoutController {
             await this._switcher.take()
             return
         }
-
+    
         const source = config.sources[intent.sourceId]
         if (!source) {
             logger.warn(`[PlayoutController] KAM take: sourceId "${intent.sourceId}" not in config.sources`)
             await this._switcher.take()
             return
         }
-
-        await this._switcher.switchToInput(source.programSrc)
+    
+        // switcherName 对 camera/vt 类必有，me 类没有
+        if (!source.switcherName) {
+            logger.warn(`[PlayoutController] KAM take: source "${intent.sourceId}" has no switcherName`)
+            await this._switcher.take()
+            return
+        }
+    
+        await this._switcher.switchToInput(source.switcherName)
         await this._switcher.take()
-        logger.info(`[PlayoutController] KAM take: ${intent.sourceId} → ${source.programSrc}`)
+        logger.info(`[PlayoutController] KAM take: ${intent.sourceId} → ${source.switcherName}`)
     }
 
     // ── SERVER/VO（视频服务器播出）────────────────────────────────────────────────
@@ -185,7 +193,7 @@ export class PlayoutController {
             logger.warn('[PlayoutController] No videoServer driver, falling back to input switch')
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
-                if (source) await this._switcher.switchToInput(source.programSrc)
+                if (source?.switcherName) await this._switcher.switchToInput(source.switcherName)
             }
             await this._switcher.take()
             return
@@ -210,7 +218,7 @@ export class PlayoutController {
             // 切换台切到对应输入口
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
-                if (source) await this._switcher.switchToInput(source.programSrc)
+                if (source?.switcherName) await this._switcher.switchToInput(source.switcherName)
             }
             await this._switcher.take()
             logger.info(`[PlayoutController] SERVER take (canPlayVideo): clip=${intent.clipId}, channel=${channel}`)
@@ -290,8 +298,9 @@ export class PlayoutController {
         // 1. MOS 数据里的显式机位（联调后从 content.sourceId 读取）
         // 2. device-config.json defaultSources 按 PartType 兜底
         const sourceId: string | null =
-            mainPiece?.content?.sourceId ??
-            this._resolveSourceId(part.type)
+            runtimeOverrideStore.get(part._id)?.sourceId ??   // 1. 运行时覆盖
+            mainPiece?.content?.sourceId ??                    // 2. MOS 数据
+            this._resolveSourceId(part.type)                   // 3. defaultSources 兜底
 
         // L3RD Piece：sourceLayerId === 'videotext'（INTRO/VIDEOTEXT 类型）
         // 已从 mos-to-rundown.ts resolveSourceLayer() 确认

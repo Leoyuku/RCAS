@@ -35,6 +35,14 @@ interface RCASStore {
 
     // 播出运行时状态
     runtime: RundownRuntime | null
+    sources: Record<string, { id: string; label: string; type: string }>
+
+    // Part 级别运行时覆盖（key = partId，value = sourceId）
+    partOverrides: Map<string, string>
+
+    // 操作
+    setPartOverride: (partId: string, sourceId: string) => void
+    clearPartOverride: (partId: string) => void
 
     // 操作
     activate: (id: string) => void
@@ -58,6 +66,8 @@ export const useRCASStore = create<RCASStore>((set) => ({
     summaries: [],
     activeRundown: null,
     runtime: null,
+    sources: {},
+    partOverrides: new Map(),
 
     _initSocket: () => {
         if (socket) return // 防止重复初始化
@@ -70,6 +80,17 @@ export const useRCASStore = create<RCASStore>((set) => ({
         socket.on('connect', () => {
             console.log('[Socket] Connected')
             set({ connected: true })
+
+            //拉取设备配置，获取 sources
+            fetch('/api/device/config')
+                .then(r => r.json())
+                .then(cfg => {
+                    if (cfg?.sources) {
+                        console.log('[Store] sources loaded:', Object.keys(cfg.sources).length)
+                        set({ sources: cfg.sources })
+                    }
+                })
+                .catch(err => console.error('[Store] Failed to load device config:', err))
         })
 
         socket.on('disconnect', (reason) => {
@@ -177,6 +198,13 @@ export const useRCASStore = create<RCASStore>((set) => ({
             console.log('[Socket] runtime:state', runtime.engineState)
             set({ runtime })
         })
+
+        // Part 覆盖状态同步
+        socket.on('runtime:overrides', ({ overrides }) => {
+            const map = new Map<string, string>()
+            overrides.forEach(o => map.set(o.partId, o.sourceId))
+            set({ partOverrides: map })
+        })
     },
 
     activate: (id: string) => {
@@ -214,13 +242,27 @@ export const useRCASStore = create<RCASStore>((set) => ({
     setNext: (partId: string) => {
         console.log('[Store] setNext called with:', partId)
         if (!socket) {
-            console.log('[Store] socket is null!')  // ← 加这行
+            console.log('[Store] socket is null!')
             return
         }
-        console.log('[Store] emitting intent:setNext')  // ← 加这行
+        console.log('[Store] emitting intent:setNext')
         socket.emit('intent:setNext', { partId }, (result) => {
-            console.log('[Store] setNext result:', result)  // ← 加这行
+            console.log('[Store] setNext result:', result)
             if (!result?.ok) console.error('[Socket] SET NEXT failed:', result?.error)
+        })
+    },
+
+    setPartOverride: (partId: string, sourceId: string) => {
+        if (!socket) return
+        socket.emit('intent:setPartOverride', { partId, sourceId }, (result) => {
+            if (!result?.ok) console.error('[Socket] SET PART OVERRIDE failed:', result?.error)
+        })
+    },
+    
+    clearPartOverride: (partId: string) => {
+        if (!socket) return
+        socket.emit('intent:clearPartOverride', { partId }, (result) => {
+            if (!result?.ok) console.error('[Socket] CLEAR PART OVERRIDE failed:', result?.error)
         })
     },
 }))
