@@ -1,249 +1,315 @@
 /**
- * @fileoverview TricasterDriver — 实现 ISwitcherDriver
+ * @fileoverview TricasterDriver — 连接 PlayoutController 与 TricasterClient
  *
  * 职责：
- * - 把 ISwitcherDriver 的抽象调用翻译成 Tricaster WebSocket shortcut 命令
- * - 所有参数（inputId、ddr、layer）由上层 PlayoutController 从 device-config 读取后传入
- * - 本文件内不出现任何写死的物理源名、IP、宏命令名
+ * - 实现 ISwitcherDriver 接口，供 PlayoutController 调用
+ * - 维护 switcherMap：sourceId → { switcherName, previewSrc }
+ *   （从 Tricaster /v1/dictionary?key=switcher 动态查询，不手动维护）
+ * - 监听 change_notifications "switcher" key，自动更新映射表
+ * - 暴露 getSwitcherSlots() 供 /api/device/inputs 接口使用
  *
- * 与 tricaster-client.ts 的分工：
- * - tricaster-client  = 协议层（WebSocket 连接管理、消息收发）
- * - tricaster-driver  = 语义层（把"dskOn(1)"翻译成正确的 shortcut 字符串）
+ * v11 改动：
+ * - 删除 commandsReady 死代码（Timeline/Resolver 路径已废弃）
+ * - 新增 switcherMap 动态查询和 diff 逻辑
+ * - stateChanged handler 接入真实逻辑
+ * - 新增 normalizeSourceId（本地用，与 core-lib source-utils 保持一致）
  */
 
-import { tricasterClient } from './tricaster-client'
+import { EventEmitter } from 'eventemitter3'
+import { tricasterClient, TricasterConnectionStatus } from './tricaster-client'
+import { deviceConfigService } from '../config/device-config.service'
 import { logger } from '../../../shared/logger'
-import type { ISwitcherDriver } from '../interfaces/device-drivers'
-import type { SwitcherCapabilities } from '../interfaces/device-capabilities'
-import type { SwitcherConfig, DeviceStatus, TallyState } from '../interfaces/device-config'
+import type { SourceConfig } from '../interfaces/device-config'
 
-export class TricasterDriver implements ISwitcherDriver {
+// ─── 类型定义 ─────────────────────────────────────────────────────────────────
 
-    readonly config: SwitcherConfig
-    readonly capabilities: SwitcherCapabilities
+/** switcherMap 中每个槽位的信息（仅静态配置字段） */
+export interface SwitcherSlot {
+    /** Tricaster iso_label 原始值，直接用于 shortcut 命令的 value */
+    switcherName: string
+    /** 预览帧 WebSocket 的 name 参数，由 physical_input_number 转小写得来 */
+    previewSrc: string
+    /** physical_input_number 原始值，保留用于诊断 */
+    physicalInput: string
+}
 
-    // Tally 订阅回调（从 stateChanged 事件派生）
-    private _tallyCallback: ((t: TallyState) => void) | null = null
+export interface TricasterDriverEvents {
+    statusChanged: (status: TricasterConnectionStatus) => void
+    /** switcherMap 更新时触发，payload 是最新的完整 map */
+    switcherMapUpdated: (map: Map<string, SwitcherSlot>) => void
+}
 
-    // 预览帧订阅回调表（source → callback）
-    private _previewCallbacks: Map<string, (frame: Buffer) => void> = new Map()
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
-    constructor(config: SwitcherConfig) {
-        this.config = config
-        this.capabilities = config.capabilities
+/**
+ * sourceId 归一化：去除所有空格，转大写
+ * 与 core-lib/src/utils/source-utils.ts 中的 normalizeSourceId 保持一致
+ * 后端本地复制一份，避免跨包 import 的路径复杂度
+ *
+ * 示例："CAM 1" → "CAM1"，"cam1" → "CAM1"
+ */
+function normalizeSourceId(id: string): string {
+    return id.replace(/\s+/g, '').toUpperCase()
+}
 
-        // 监听通知通道，派发给已注册的订阅者
-        tricasterClient.on('stateChanged', (key, data) => {
-            this._handleStateChanged(key, data)
+// ─── TricasterDriver ──────────────────────────────────────────────────────────
+
+export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
+    /**
+     * 动态映射表：归一化 sourceId → SwitcherSlot
+     * key 示例："CAM1"（由 iso_label "CAM 1" 归一化得来）
+     * 启动时从 Tricaster 查询建立，change_notifications 触发时自动更新
+     */
+    private _switcherMap: Map<string, SwitcherSlot> = new Map()
+
+    /** 上次 switcherMap 的序列化快照，用于 diff 比较 */
+    private _lastSwitcherMapSnapshot: string = ''
+
+    // ── 初始化 ────────────────────────────────────────────────────────────────
+
+    init(): void {
+        // 监听 Tricaster 连接状态变化，转发给上层
+        tricasterClient.on('statusChanged', (status) => {
+            logger.info(`[TricasterDriver] Connection status: ${status}`)
+            this.emit('statusChanged', status)
+
+            // 控制通道连接成功后，立即查询一次 switcherMap
+            // （通知通道可能稍晚连接，不等它）
+            if (status === 'CONNECTED') {
+                this._fetchAndUpdateSwitcherMap()
+            }
         })
-    }
 
-    // ─── 连接管理 ──────────────────────────────────────────────────────────────
+        // 监听 change_notifications，处理 "switcher" key
+        tricasterClient.on('stateChanged', (key) => {
+            if (key === 'switcher') {
+                logger.debug('[TricasterDriver] Received switcher change notification, refreshing map...')
+                this._fetchAndUpdateSwitcherMap()
+            }
+            // 其他 key（tally / ddr_playlist 等）由后续模块处理
+        })
 
-    async connect(): Promise<void> {
+        // 启动连接
         tricasterClient.connect()
-        logger.info('[TricasterDriver] connect()')
+        logger.info('[TricasterDriver] Initialized.')
     }
 
-    async disconnect(): Promise<void> {
-        tricasterClient.destroy()
-        logger.info('[TricasterDriver] disconnect()')
-    }
+    // ── ISwitcherDriver 接口实现 ──────────────────────────────────────────────
 
-    async getStatus(): Promise<DeviceStatus> {
-        const s = tricasterClient.overallStatus
-        const map: Record<string, DeviceStatus> = {
-            CONNECTED: 'connected',
-            CONNECTING: 'connecting',
-            DISCONNECTED: 'disconnected',
-            ERROR: 'error',
+    /**
+     * 设置预监源
+     * @param sourceId NCS 侧的 sourceId（如 "CAM1"，或已有覆盖的 sourceId）
+     */
+    setPreview(sourceId: string): boolean {
+        const slot = this._resolveSlot(sourceId)
+        if (!slot) {
+            logger.warn(`[TricasterDriver] setPreview: sourceId "${sourceId}" not found in switcherMap`)
+            return false
         }
-        return map[s] ?? 'error'
+        // shortcut: main_b_row_named_input，value 用 iso_label 原始值
+        return tricasterClient.sendShortcut('main_b_row_named_input', slot.switcherName)
     }
 
-    // ─── 视频切换 ──────────────────────────────────────────────────────────────
-    //
-    // inputId 是切换台的物理输入口 ID，例如 'input1'、'input7'。
-    // 这个值由 PlayoutController 从 device-config.json sources[x].programSrc 读取后传入，
-    // 本文件内不做任何 source 到 input 的映射。
-
-    async switchToInput(inputId: string): Promise<void> {
-        // Tricaster shortcut 格式：<inputId>_select_preview
-        // 先把目标源推到 preview，再由 take() 执行切换
-        tricasterClient.sendShortcut(`${inputId}_select_preview`)
-        logger.info(`[TricasterDriver] switchToInput: ${inputId}`)
+    /**
+     * 执行 TAKE（PGM ↔ PVW 互换）
+     * TAKE 本质是切换动作，与具体 source 无关
+     */
+    take(): boolean {
+        return tricasterClient.sendShortcut('main_background_take')
     }
 
-    async take(): Promise<void> {
-        tricasterClient.sendShortcut('main_background_take')
-        logger.info('[TricasterDriver] take()')
+    // ── 查询接口（供 /api/device/inputs 使用） ────────────────────────────────
+
+    /**
+     * 返回当前所有已知的 Tricaster 槽位（完整 switcherMap）
+     * 供前端"添加源"流程使用：展示所有可用槽位，过滤掉已配置的
+     */
+    getSwitcherSlots(): Map<string, SwitcherSlot> {
+        return new Map(this._switcherMap) // 返回副本，防止外部修改
     }
 
-    async auto(): Promise<void> {
-        tricasterClient.sendShortcut('main_background_auto')
-        logger.info('[TricasterDriver] auto()')
+    /**
+     * 根据 sourceId 查找槽位信息
+     * 支持归一化匹配（"CAM1" 和 "CAM 1" 都能找到）
+     */
+    getSlot(sourceId: string): SwitcherSlot | undefined {
+        return this._resolveSlot(sourceId)
     }
 
-    async cut(): Promise<void> {
-        tricasterClient.sendShortcut('main_background_cut')
-        logger.info('[TricasterDriver] cut()')
+    // ── 状态查询 ──────────────────────────────────────────────────────────────
+
+    get connectionStatus(): TricasterConnectionStatus {
+        return tricasterClient.overallStatus
     }
 
-    // ─── DDR ───────────────────────────────────────────────────────────────────
-    //
-    // ddr 参数由 PlayoutController 从 device-config.json ddrMapping 读取后传入，
-    // 例如 'ddr1'、'ddr2'。
+    // ── 私有：动态查询和更新 switcherMap ─────────────────────────────────────
 
-    async loadClip(clipId: string, ddr: string): Promise<void> {
-        if (!this.capabilities.canReceiveDDR) {
-            logger.warn('[TricasterDriver] loadClip() skipped: canReceiveDDR=false')
-            return
+    /**
+     * 从 Tricaster 查询 /v1/dictionary?key=switcher
+     * 解析 XML，提取静态槽位信息，与缓存 diff，有变化才更新
+     */
+    private async _fetchAndUpdateSwitcherMap(): Promise<void> {
+        try {
+            const parsed = await tricasterClient.fetchState('switcher')
+            if (!parsed) {
+                logger.warn('[TricasterDriver] fetchState("switcher") returned null')
+                return
+            }
+
+            const newMap = this._parseSwitcherXml(parsed)
+            if (newMap.size === 0) {
+                logger.warn('[TricasterDriver] Parsed switcher map is empty, skipping update')
+                return
+            }
+
+            // Diff：只比较静态配置字段，忽略运行时状态（main_source / preview_source 等）
+            const snapshot = this._serializeMapForDiff(newMap)
+            if (snapshot === this._lastSwitcherMapSnapshot) {
+                logger.debug('[TricasterDriver] switcherMap unchanged, skipping update')
+                return
+            }
+
+            // 有变化：更新映射表
+            this._switcherMap = newMap
+            this._lastSwitcherMapSnapshot = snapshot
+            logger.info(`[TricasterDriver] switcherMap updated: ${newMap.size} slots`)
+            newMap.forEach((slot, key) => {
+                logger.debug(`  ${key} → switcherName="${slot.switcherName}", previewSrc="${slot.previewSrc}"`)
+            })
+
+            // 通知 DeviceConfigService 更新 sources 中的动态字段
+            this._syncToDeviceConfig(newMap)
+
+            // 触发事件，供其他模块监听
+            this.emit('switcherMapUpdated', new Map(newMap))
+
+        } catch (err: any) {
+            logger.warn(`[TricasterDriver] _fetchAndUpdateSwitcherMap error: ${err.message}`)
         }
-        tricasterClient.sendShortcut(`${ddr}_clip_name`, clipId)
-        logger.info(`[TricasterDriver] loadClip: "${clipId}" → ${ddr}`)
     }
 
-    async playDDR(ddr: string): Promise<void> {
-        if (!this.capabilities.canReceiveDDR) return
-        tricasterClient.sendShortcut(`${ddr}_play`)
-        logger.info(`[TricasterDriver] playDDR: ${ddr}`)
-    }
+    /**
+     * 解析 fast-xml-parser 返回的 switcher 对象
+     * 提取每个 input 槽位的静态配置字段
+     *
+     * Tricaster XML 结构（参考文档）：
+     * <switcher_update main_source="..." preview_source="..." ...>
+     *   <inputs>
+     *     <input iso_label="CAM 1" physical_input_number="Input1" button_label="1" .../>
+     *     <input iso_label="CAM 2" physical_input_number="Input2" .../>
+     *     ...
+     *   </inputs>
+     * </switcher_update>
+     *
+     * 注意：实际 XML 结构需联调后验证，这里按文档最可能的格式解析
+     * 如果字段路径与实际不符，调整 _extractInputs() 即可，上层逻辑不变
+     */
+    private _parseSwitcherXml(parsed: any): Map<string, SwitcherSlot> {
+        const map = new Map<string, SwitcherSlot>()
 
-    async stopDDR(ddr: string): Promise<void> {
-        if (!this.capabilities.canReceiveDDR) return
-        tricasterClient.sendShortcut(`${ddr}_stop`)
-        logger.info(`[TricasterDriver] stopDDR: ${ddr}`)
-    }
-
-    // ─── DSK ───────────────────────────────────────────────────────────────────
-    //
-    // layer 参数由 PlayoutController 从 device-config.json dskMapping[pieceType] 读取后传入，
-    // 例如 L3RD → 1, BUG → 2。
-
-    async dskOn(layer: number): Promise<void> {
-        if (!this.capabilities.dsk) {
-            logger.warn('[TricasterDriver] dskOn() skipped: dsk=false')
-            return
+        const inputs = this._extractInputs(parsed)
+        if (!inputs || inputs.length === 0) {
+            logger.warn('[TricasterDriver] No inputs found in switcher XML')
+            return map
         }
-        tricasterClient.sendShortcut(`dsk${layer}_show`)
-        logger.info(`[TricasterDriver] dskOn: layer ${layer}`)
-    }
 
-    async dskOff(layer: number): Promise<void> {
-        if (!this.capabilities.dsk) return
-        tricasterClient.sendShortcut(`dsk${layer}_hide`)
-        logger.info(`[TricasterDriver] dskOff: layer ${layer}`)
-    }
+        for (const input of inputs) {
+            const isoLabel: string = input['iso_label'] ?? input['isoLabel'] ?? ''
+            const physicalInput: string = input['physical_input_number'] ?? input['physicalInputNumber'] ?? ''
 
-    async dskAuto(layer: number): Promise<void> {
-        if (!this.capabilities.dsk) return
-        tricasterClient.sendShortcut(`dsk${layer}_auto`)
-        logger.info(`[TricasterDriver] dskAuto: layer ${layer}`)
-    }
+            if (!isoLabel || !physicalInput) continue
 
-    // ─── 实时预览帧 ────────────────────────────────────────────────────────────
-    //
-    // TODO（联调阶段）：
-    // Tricaster 的预览帧通过 HTTP multipart stream 获取，
-    // 端点格式：http://<host>/v1/preview?source=<inputId>
-    // tricaster-client 目前没有实现这个功能，联调时在 client 层补充，
-    // driver 层的接口签名保持不变。
+            // 过滤非摄像机槽位（BFR / DDR / GFX 等暂不纳入 switcherMap）
+            // 联调后根据实际槽位名称调整过滤规则
+            // 目前保留所有槽位，由上层决定使用哪些
+            const key = normalizeSourceId(isoLabel)
+            const previewSrc = physicalInput.toLowerCase() // "Input1" → "input1"
 
-    async getPreviewFrame(_source: string): Promise<Buffer> {
-        if (!this.capabilities.livePreview) return Buffer.alloc(0)
-        // TODO: 联调时通过 tricasterClient.fetchPreviewFrame(source) 实现
-        logger.debug('[TricasterDriver] getPreviewFrame(): stub，待联调实现')
-        return Buffer.alloc(0)
-    }
-
-    subscribePreviewFrame(source: string, cb: (frame: Buffer) => void): void {
-        if (!this.capabilities.livePreview) return
-        this._previewCallbacks.set(source, cb)
-        // TODO: 联调时启动 HTTP multipart stream 订阅
-        logger.debug(`[TricasterDriver] subscribePreviewFrame: ${source} registered（待联调）`)
-    }
-
-    unsubscribePreviewFrame(source: string): void {
-        this._previewCallbacks.delete(source)
-    }
-
-    // ─── Tally ─────────────────────────────────────────────────────────────────
-    //
-    // Tricaster change_notifications 会推送 switcher 状态变化，
-    // 其中包含当前 program/preview 的 input 信息。
-    // _handleStateChanged 负责解析并触发 tally 回调。
-
-    async getTally(): Promise<TallyState> {
-        if (!this.capabilities.tally) return { program: [], preview: [] }
-        // fetchState 返回当前快照，格式待联调确认
-        const data = await tricasterClient.fetchState('switcher')
-        return this._parseTallyFromState(data)
-    }
-
-    subscribeTally(cb: (t: TallyState) => void): void {
-        if (!this.capabilities.tally) return
-        this._tallyCallback = cb
-        logger.info('[TricasterDriver] subscribeTally: registered')
-    }
-
-    // ─── DataLink ──────────────────────────────────────────────────────────────
-    //
-    // TODO（VIZ 联调阶段）：
-    // DataLink 通过 Tricaster shortcut 注入文字数据，
-    // 具体 shortcut 名称待现场确认，格式通常为 datalink_<key>_data = <value>
-
-    async pushDataLink(key: string, value: string): Promise<void> {
-        if (!this.capabilities.datalink) {
-            logger.warn('[TricasterDriver] pushDataLink() skipped: datalink=false')
-            return
+            map.set(key, {
+                switcherName: isoLabel,   // 保留原始值，发给 Tricaster 的命令用这个
+                previewSrc,
+                physicalInput,
+            })
         }
-        // TODO: 联调时确认实际 shortcut 格式
-        tricasterClient.sendShortcut(`datalink_${key}_data`, value)
-        logger.info(`[TricasterDriver] pushDataLink: ${key}=${value}`)
+
+        return map
     }
 
-    // ─── 内部：stateChanged 事件处理 ──────────────────────────────────────────
+    /**
+     * 从解析后的对象中提取 input 数组
+     * 隔离 XML 结构的不确定性，联调后如果路径不对只改这一处
+     */
+    private _extractInputs(parsed: any): any[] | null {
+        // 尝试各种可能的路径
+        const candidates = [
+            parsed?.switcher_update?.inputs?.input,
+            parsed?.switcher?.inputs?.input,
+            parsed?.inputs?.input,
+        ]
 
-    private _handleStateChanged(key: string, data: unknown): void {
-        // Tally 派发
-        if (key === 'switcher' && this._tallyCallback) {
-            const tally = this._parseTallyFromState(data)
-            this._tallyCallback(tally)
+        for (const candidate of candidates) {
+            if (!candidate) continue
+            // fast-xml-parser：单个元素返回对象，多个元素返回数组
+            return Array.isArray(candidate) ? candidate : [candidate]
         }
-        // 预览帧派发（如果未来 client 层推帧数据过来）
-        // if (key.startsWith('preview_frame:')) { ... }
+
+        return null
     }
 
-    private _parseTallyFromState(data: unknown): TallyState {
-        // TODO：联调时根据 Tricaster 实际返回格式解析
-        // 当前返回空状态，不影响播出
-        if (!data || typeof data !== 'object') return { program: [], preview: [] }
-        return { program: [], preview: [] }
+    /**
+     * 序列化 map 用于 diff 比较
+     * 只序列化静态字段（switcherName / previewSrc / physicalInput）
+     * 不包含运行时状态，确保 TAKE 触发的 switcher 通知不会导致无意义更新
+     */
+    private _serializeMapForDiff(map: Map<string, SwitcherSlot>): string {
+        const entries = [...map.entries()]
+            .sort(([a], [b]) => a.localeCompare(b)) // 排序保证稳定性
+            .map(([key, slot]) => `${key}:${slot.switcherName}:${slot.previewSrc}`)
+        return entries.join('|')
+    }
+
+    /**
+     * 将动态查询到的 switcherName / previewSrc 同步到 DeviceConfigService
+     * 只更新已在 device-config.json sources 中配置的条目
+     * 不自动新增，不修改 type / label 等手动配置字段
+     */
+    private _syncToDeviceConfig(map: Map<string, SwitcherSlot>): void {
+        try {
+            const config = deviceConfigService.getConfig()
+            let changed = false
+
+            for (const [sourceId, source] of Object.entries(config.sources)) {
+                if (source.type !== 'camera') continue // 只处理 camera 类型
+
+                const slot = map.get(normalizeSourceId(sourceId))
+                if (!slot) continue
+
+                // 检查是否有变化
+                if (source.switcherName !== slot.switcherName || source.previewSrc !== slot.previewSrc) {
+                    (config.sources[sourceId] as SourceConfig).switcherName = slot.switcherName
+                        ; (config.sources[sourceId] as SourceConfig).previewSrc = slot.previewSrc
+                    changed = true
+                    logger.info(`[TricasterDriver] Updated source "${sourceId}": switcherName="${slot.switcherName}", previewSrc="${slot.previewSrc}"`)
+                }
+            }
+
+            if (changed) {
+                // 用 saveConfig 持久化并触发 onChange 监听器（通知前端）
+                deviceConfigService.saveConfig(config, 'auto-sync-from-tricaster')
+            }
+        } catch (err: any) {
+            logger.warn(`[TricasterDriver] _syncToDeviceConfig error: ${err.message}`)
+        }
+    }
+
+    /**
+     * 查找槽位，支持归一化匹配
+     */
+    private _resolveSlot(sourceId: string): SwitcherSlot | undefined {
+        return this._switcherMap.get(normalizeSourceId(sourceId))
     }
 }
 
-// ─── 全局单例 ──────────────────────────────────────────────────────────────────
-// 注意：这个单例在 PlayoutController 里通过 createDriver() 工厂创建，
-// 直接导出是为了兼容现有的 socket-server 对 tricasterDriver 的引用。
-// 配置层落地后（第五步），改为从 factory.ts 统一创建。
+// ─── 全局单例 ─────────────────────────────────────────────────────────────────
 
-import { config } from '../../../shared/config'
-
-export const tricasterDriver = new TricasterDriver({
-    type: 'tricaster',
-    role: 'switcher',
-    label: '默认 Tricaster',
-    capabilities: {
-        canReceiveDDR: true,
-        canReceiveInput: true,
-        livePreview: true,
-        tally: true,
-        datalink: true,
-        dsk: true,
-        dskLayers: 4,
-    },
-    connection: {
-        host: config.tricasterHost,
-        port: config.tricasterPort,
-    },
-})
+export const tricasterDriver = new TricasterDriver()

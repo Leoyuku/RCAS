@@ -87,8 +87,6 @@ export default function App() {
 
     return (
         <div 
-        onDragOver={(e) => { e.preventDefault(); console.log('ROOT DRAG OVER') }}
-        onDrop={(e) => { e.preventDefault(); console.log('ROOT DROP', e.dataTransfer.getData('sourceId')) }}
         style={{
             display:       'flex',
             flexDirection: 'column',
@@ -674,23 +672,6 @@ function RightPanel() {
                             {TAB_LABELS[type] ?? type.toUpperCase()}
                         </div>
                     ))}
-                </div>
-
-                {/* 临时拖拽测试区 */}
-                <div
-                    onDragOver={(e) => { e.preventDefault(); console.log('TEST DRAG OVER') }}
-                    onDrop={(e) => { e.preventDefault(); console.log('TEST DROP', e.dataTransfer.getData('sourceId')) }}
-                    style={{
-                        height: 60,
-                        background: 'red',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontSize: 12,
-                    }}
-                >
-                    拖到这里测试
                 </div>
 
                 {/* Tab 内容区：源卡片 */}

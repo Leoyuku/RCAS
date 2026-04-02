@@ -682,13 +682,11 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 if (partId === runtime?.onAirPartId) return
                                                 e.preventDefault()
                                                 e.dataTransfer.dropEffect = 'copy'
-                                                console.log('DRAG OVER thumbnail')
                                             }}
                                             onDrop={(e) => {
                                                 if (partId === runtime?.onAirPartId) return
                                                 e.preventDefault()
                                                 const sourceId = e.dataTransfer.getData('sourceId')
-                                                console.log('DROP', sourceId)
                                                 if (!sourceId) return
                                                 const droppedSource = Object.values(sources).find(s => s.id === sourceId)
                                                 if (!droppedSource) return
