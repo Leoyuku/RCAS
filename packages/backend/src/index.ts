@@ -22,7 +22,6 @@
 // ── 必须第一行：加载 .env 文件 ────────────────────────────────────────────────
 import 'dotenv/config';
 import { rundownEngine } from './modules/3_domain_engine/engine/rundown-engine';
-
 import http                           from 'http';
 import express, { Request, Response } from 'express';
 import cors                           from 'cors';
@@ -40,11 +39,13 @@ import { deviceConfigRouter }   from './modules/4_playout_controllers/config/dev
 // ─── 主启动流程 ───────────────────────────────────────────────────────────────
 
 (async () => {
+    console.log('[DEBUG] IIFE started')
     logger.info('╔══════════════════════════════════════╗');
     logger.info('║       RCAS Backend Starting...       ║');
     logger.info('╚══════════════════════════════════════╝');
 
     // ── 1. 启动自检 ───────────────────────────────────────────────────────────
+    logger.info('[Startup] Step 1: runStartupChecks...')
     try {
         await runStartupChecks();
     } catch (err) {
@@ -52,18 +53,22 @@ import { deviceConfigRouter }   from './modules/4_playout_controllers/config/dev
         process.exit(1);
     }
 
-    // ── 2. 初始化 RundownStore（订阅 MosCache 事件） ──────────────────────────
+    // ── 2. 初始化 RundownStore + Engine + TricasterDriver ─────────────────────
+    logger.info('[Startup] Step 2: rundownStore.init...')
     rundownStore.init();
     rundownEngine.init();
-    tricasterDriver.connect()
+
+    logger.info('[Startup] Step 3: tricasterDriver.init...')
+    tricasterDriver.init()
+
     // 加载设备配置
+    logger.info('[Startup] Step 4: deviceConfigService.load...')
     const deviceConfig = deviceConfigService.load()
 
     // 配置变更时热更新 PlayoutController
     deviceConfigService.onChange((cfg) => playoutController.updateConfig(cfg))
 
     // 初始化 PlayoutController
-    tricasterDriver.connect()
     playoutController.init(deviceConfig)
 
     // ── 3. 从磁盘恢复持久化索引（不自动激活） ─────────────────────────────────
@@ -173,4 +178,7 @@ import { deviceConfigRouter }   from './modules/4_playout_controllers/config/dev
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT',  () => shutdown('SIGINT'));
 
-})();
+})().catch(err => {
+    console.error('[FATAL] Unhandled error during startup:', err)
+    process.exit(1)
+})

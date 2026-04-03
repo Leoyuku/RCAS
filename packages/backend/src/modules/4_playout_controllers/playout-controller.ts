@@ -180,7 +180,7 @@ export class PlayoutController {
             return
         }
     
-        await this._switcher.switchToInput(source.switcherName)
+        await (this._switcher as any).setPreview(source.switcherName)
         await this._switcher.take()
         logger.info(`[PlayoutController] KAM take: ${intent.sourceId} → ${source.switcherName}`)
     }
@@ -193,7 +193,7 @@ export class PlayoutController {
             logger.warn('[PlayoutController] No videoServer driver, falling back to input switch')
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
-                if (source?.switcherName) await this._switcher.switchToInput(source.switcherName)
+                if (source?.switcherName) await (this._switcher as any).setPreview(source.switcherName)
             }
             await this._switcher.take()
             return
@@ -218,7 +218,7 @@ export class PlayoutController {
             // 切换台切到对应输入口
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
-                if (source?.switcherName) await this._switcher.switchToInput(source.switcherName)
+                if (source?.switcherName) await (this._switcher as any).setPreview(source.switcherName)
             }
             await this._switcher.take()
             logger.info(`[PlayoutController] SERVER take (canPlayVideo): clip=${intent.clipId}, channel=${channel}`)
@@ -356,6 +356,6 @@ export class PlayoutController {
 // 第五步完成后，改为从 factory.ts createDriver() 注入
 
 export const playoutController = new PlayoutController(
-    tricasterDriver,
+    tricasterDriver as unknown as ISwitcherDriver,
     null   // videoServer：Bitcentral 驱动 P2 实现后注入
 )

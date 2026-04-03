@@ -56,9 +56,21 @@ export function useTricasterFrame(
 
         function connect() {
             if (destroyedRef.current) return
-
+        
             const url = `ws://${tricasterHost}/v1/video_notifications?name=${previewSrc}&xres=${VIDEO_XRES}&yres=${VIDEO_YRES}&q=${VIDEO_QUALITY}`
-            const ws = new WebSocket(url)
+            
+            let ws: WebSocket
+            try {
+                ws = new WebSocket(url)
+            } catch (err) {
+                console.warn('[useTricasterFrame] WebSocket blocked (HTTPS env?):', err)
+                return
+            }
+        
+            wsRef.current = ws
+            ws.binaryType = 'blob'
+            // ... 后속 onopen / onmessage / onerror / onclose 不变
+
             wsRef.current = ws
 
             ws.binaryType = 'blob'

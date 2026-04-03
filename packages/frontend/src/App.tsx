@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
+import { useTricasterFrame } from './hooks/useTricasterFrame'
 
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
@@ -604,6 +605,7 @@ function RightPanel() {
 
     // 当前 Tab 的源列表
     const currentSources = Object.values(sources).filter(s => s.type === activeTab)
+    const tricasterHost = useRCASStore(s => s.tricasterHost)
 
     return (
         <div style={{
@@ -696,60 +698,111 @@ function RightPanel() {
                             无可用源
                         </div>
                     ) : currentSources.map(source => (
-                        <div
+                        <SourceCard
                             key={source.id}
-                            draggable
-                            onClick={() => setSelectedSourceId(source.id)}
+                            source={source}
+                            isSelected={selectedSourceId === source.id}
+                            tricasterHost={activeTab === 'camera' ? tricasterHost : null}
+                            onSelect={() => setSelectedSourceId(source.id)}
                             onDragStart={(e) => {
-                                console.log('DRAG START', source.id)
                                 e.dataTransfer.setData('sourceId', source.id)
                                 e.dataTransfer.effectAllowed = 'copy'
                             }}
-                            style={{
-                                width: '120px',
-                                aspectRatio: '16/9',
-                                background: selectedSourceId === source.id ? '#3A3A3A' : '#1C1C1C',
-                                border: `1px solid ${selectedSourceId === source.id ? COLOR.pvw : COLOR.border}`,
-                                borderRadius: 3,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'grab',
-                                position: 'relative',
-                                overflow: 'hidden',
-                            }}
-                        >
-                            {/* 源类型图标 */}
-                            <div style={{
-                                fontSize: 14,
-                                marginBottom: 4,
-                                opacity: 0.4,
-                            }}>
-                                {source.type === 'camera' ? '📷' : source.type === 'vt' ? '▶' : '🎬'}
-                            </div>
-                            {/* 源 ID */}
-                            <div style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                color: COLOR.text,
-                                fontFamily: '"JetBrains Mono", monospace',
-                                letterSpacing: '0.06em',
-                            }}>
-                                {source.id}
-                            </div>
-                            {/* 源标签 */}
-                            <div style={{
-                                fontSize: 9,
-                                color: COLOR.textDim,
-                                marginTop: 2,
-                            }}>
-                                {source.label}
-                            </div>
-                        </div>
-                    ))}
+                        />
+                    ))
+                    }
                 </div>
             </div>
+        </div>
+    )
+}
+
+// ─── 源卡片（含实时帧） ────────────────────────────────────────────────────────
+
+function SourceCard({ source, isSelected, tricasterHost, onSelect, onDragStart }: {
+    source:       { id: string; label: string; type: string; previewSrc?: string }
+    isSelected:   boolean
+    tricasterHost: string | null
+    onSelect:     () => void
+    onDragStart:  (e: React.DragEvent<HTMLDivElement>) => void
+}) {
+    // CAM 卡片：直连 Tricaster 实时帧；其他类型不建立连接（tricasterHost 传 null）
+    const frameUrl = useTricasterFrame(
+        tricasterHost,
+        source.previewSrc ?? null
+    )
+
+    return (
+        <div
+            draggable
+            onClick={onSelect}
+            onDragStart={onDragStart}
+            style={{
+                width:        '120px',
+                aspectRatio:  '16/9',
+                background:   isSelected ? '#3A3A3A' : '#1C1C1C',
+                border:       `1px solid ${isSelected ? COLOR.pvw : COLOR.border}`,
+                borderRadius: 3,
+                display:      'flex',
+                flexDirection:'column',
+                alignItems:   'center',
+                justifyContent: 'center',
+                cursor:       'grab',
+                position:     'relative',
+                overflow:     'hidden',
+            }}
+        >
+            {/* 实时帧（CAM 类型且有帧时显示） */}
+            {frameUrl ? (
+                <img
+                    src={frameUrl}
+                    alt={source.id}
+                    style={{
+                        position:   'absolute',
+                        inset:      0,
+                        width:      '100%',
+                        height:     '100%',
+                        objectFit:  'cover',
+                    }}
+                />
+            ) : (
+                /* 无帧时显示图标占位 */
+                <div style={{ fontSize: 14, marginBottom: 4, opacity: 0.4 }}>
+                    {source.type === 'camera' ? '📷' : source.type === 'vt' ? '▶' : '🎬'}
+                </div>
+            )}
+
+            {/* 源 ID 标签（叠加在帧上） */}
+            <div style={{
+                position:      'absolute',
+                bottom:        0,
+                left:          0,
+                right:         0,
+                padding:       '2px 4px',
+                background:    'rgba(0,0,0,0.65)',
+                fontSize:      9,
+                fontWeight:    700,
+                color:         COLOR.text,
+                fontFamily:    '"JetBrains Mono", monospace',
+                letterSpacing: '0.06em',
+                display:       'flex',
+                justifyContent:'space-between',
+                alignItems:    'center',
+            }}>
+                <span>{source.id}</span>
+                <span style={{ color: COLOR.textDim, fontWeight: 400 }}>{source.label}</span>
+            </div>
+
+            {/* 选中高亮边框遮罩 */}
+            {isSelected && (
+                <div style={{
+                    position:      'absolute',
+                    inset:         0,
+                    border:        `2px solid ${COLOR.pvw}`,
+                    borderRadius:  3,
+                    pointerEvents: 'none',
+                }}/>
+            )}
         </div>
     )
 }

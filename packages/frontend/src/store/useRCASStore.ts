@@ -35,6 +35,8 @@ interface RCASStore {
 
     // 播出运行时状态
     runtime: RundownRuntime | null
+    // Tricaster 主机地址（来自 device-config connection.host，供前端直连预览帧）
+    tricasterHost: string | null
     sources: Record<string, { id: string; label: string; type: string }>
 
     // Part 级别运行时覆盖（key = partId，value = sourceId）
@@ -68,6 +70,7 @@ export const useRCASStore = create<RCASStore>((set) => ({
     runtime: null,
     sources: {},
     partOverrides: new Map(),
+    tricasterHost: null,
 
     _initSocket: () => {
         if (socket) return // 防止重复初始化
@@ -89,6 +92,13 @@ export const useRCASStore = create<RCASStore>((set) => ({
                         console.log('[Store] sources loaded:', Object.keys(cfg.sources).length)
                         set({ sources: cfg.sources })
                     }
+                    // 提取 Tricaster host，供前端直连 video_notifications
+                    const switcherId = cfg?.activeDevices?.switcher
+                    const host = switcherId ? cfg?.devices?.[switcherId]?.connection?.host ?? null : null
+                    if (host) {
+                        console.log('[Store] tricasterHost:', host)
+                    }
+                    set({ tricasterHost: host })
                 })
                 .catch(err => console.error('[Store] Failed to load device config:', err))
         })

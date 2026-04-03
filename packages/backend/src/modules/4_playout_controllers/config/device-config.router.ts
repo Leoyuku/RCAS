@@ -77,7 +77,7 @@ deviceConfigRouter.post('/device/active', (req: Request, res: Response) => {
 
 deviceConfigRouter.get('/device/status', async (_req: Request, res: Response) => {
     try {
-        const switcherStatus = await tricasterDriver.getStatus()
+        const switcherStatus = tricasterDriver.connectionStatus
         res.json({
             switcher: { status: switcherStatus },
             videoServer: { status: 'disconnected' },  // P2 BitcentralDriver 完成后补充
@@ -102,8 +102,8 @@ deviceConfigRouter.post('/device/test-connection', async (req: Request, res: Res
 
     // 目前只支持测试 Tricaster，其他设备驱动 P2/P4 实现后扩展
     if (device.type === 'tricaster') {
-        const status = await tricasterDriver.getStatus()
-        res.json({ ok: status === 'connected', status })
+        const status = tricasterDriver.connectionStatus
+        res.json({ ok: status === 'CONNECTED', status })
         return
     }
 
