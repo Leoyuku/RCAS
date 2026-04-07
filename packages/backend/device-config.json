@@ -28,35 +28,54 @@
     "sources": {
         "CAM1": {
             "id": "CAM1",
-            "label": "1号机",
             "type": "camera",
             "previewSrc": "input1",
             "switcherName": "INPUT1"
         },
         "CAM2": {
             "id": "CAM2",
-            "label": "2号机",
             "type": "camera",
             "previewSrc": "input2",
             "switcherName": "INPUT2"
         },
+        "DDR1": {
+            "id": "DDR1",
+            "type": "ddr1",
+            "previewSrc": "ddr1",
+            "switcherName": "ddr1"
+        },
+        "DDR2": {
+            "id": "DDR2",
+            "type": "ddr2",
+            "previewSrc": "ddr2",
+            "switcherName": "ddr2"
+        },
+        "DDR3": {
+            "id": "DDR3",
+            "type": "ddr3",
+            "previewSrc": "ddr3",
+            "switcherName": "ddr3"
+        },
+        "DDR4": {
+            "id": "DDR4",
+            "type": "ddr4",
+            "previewSrc": "ddr4",
+            "switcherName": "ddr4"
+        },
         "VT_A": {
             "id": "VT_A",
-            "label": "视频A路",
             "type": "vt",
             "previewSrc": "input7",
             "switcherName": "INPUT7"
         },
         "VT_B": {
             "id": "VT_B",
-            "label": "视频B路",
             "type": "vt",
             "previewSrc": "input8",
             "switcherName": "INPUT8"
         },
         "ME1": {
             "id": "ME1",
-            "label": "绿幕合成",
             "type": "me",
             "meIndex": 1
         }

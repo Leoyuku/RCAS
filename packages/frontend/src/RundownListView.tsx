@@ -313,42 +313,64 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
     const rows = useMemo(() => buildStoryRows(rundown), [rundown])
 
     // ── 所有 hooks 在顶层 ──────────────────────────────────────────
-    const [isAutoFollow, setIsAutoFollow] = useState(true)
+    const isAutoFollowRef = useRef(true)
+    const [showManualBanner, setShowManualBanner] = useState(false)
+    const [containerHeight, setContainerHeight] = useState(600)
     const scrollContainerRef = useRef<HTMLDivElement | null>(null)
     const onAirRowRef        = useRef<HTMLDivElement | null>(null)
     const prevOnAirPartId = useRef<string | null>(null)
+    const animFrameRef = useRef<number | null>(null)
+    const [followTrigger, setFollowTrigger] = useState(0)
+
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            setContainerHeight(scrollContainerRef.current.clientHeight)
+        }
+    }, [])
 
     useEffect(() => {
         if (!runtime?.onAirPartId) return
     
-        // 只有 onAirPartId 真正变化时（即发生了 TAKE），才重置磁吸
         if (runtime.onAirPartId !== prevOnAirPartId.current) {
             prevOnAirPartId.current = runtime.onAirPartId
-            setIsAutoFollow(true)
+            isAutoFollowRef.current = true
+            setShowManualBanner(false)
         }
-        if (!isAutoFollow) return
-        if (!onAirRowRef.current || !scrollContainerRef.current) return
+        if (!isAutoFollowRef.current) return
     
-        const container = scrollContainerRef.current
-        const row       = onAirRowRef.current
-        const targetTop = row.offsetTop - container.offsetTop
-        const startTop  = container.scrollTop
-        const distance  = targetTop - startTop
-        const duration  = 800
-        const startTime = performance.now()
+        const timeoutId = setTimeout(() => {
+            if (!onAirRowRef.current || !scrollContainerRef.current) return
     
-        const animate = (currentTime: number) => {
-            const elapsed  = currentTime - startTime
-            const progress = Math.min(elapsed / duration, 1)
-            const ease     = progress < 0.5
-                ? 2 * progress * progress
-                : 1 - Math.pow(-2 * progress + 2, 2) / 2
-            container.scrollTop = startTop + distance * ease
-            if (progress < 1) requestAnimationFrame(animate)
-        }
+            const container = scrollContainerRef.current
+            const row       = onAirRowRef.current
+            const startTop  = container.scrollTop
+            const targetTop = row.offsetTop - container.offsetTop
+            const distance  = targetTop - startTop
     
-        requestAnimationFrame(animate)
-    }, [runtime?.onAirPartId, isAutoFollow])
+            if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
+    
+            const animate = (currentTime: number) => {
+                const elapsed  = currentTime - startTime
+                const progress = Math.min(elapsed / duration, 1)
+                const ease     = progress < 0.5
+                    ? 2 * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 2) / 2
+                container.scrollTop = startTop + distance * ease
+                if (progress < 1) {
+                    animFrameRef.current = requestAnimationFrame(animate)
+                } else {
+                    container.scrollTop = startTop + distance
+                    animFrameRef.current = null
+                }
+            }
+    
+            const duration  = 800
+            const startTime = performance.now()
+            animFrameRef.current = requestAnimationFrame(animate)
+        }, 50)
+    
+        return () => clearTimeout(timeoutId)
+    }, [runtime?.onAirPartId, followTrigger])
 
     const stats = useMemo(() => {
         const allParts = rows.flatMap(r => r.parts)
@@ -366,9 +388,13 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: C.bgBase }}>
             <ColumnHeader />
-            {!isAutoFollow && runtime?.onAirPartId && (
+            {showManualBanner && runtime?.onAirPartId && (
                 <div
-                    onClick={() => setIsAutoFollow(true)}
+                    onClick={() => { 
+                        isAutoFollowRef.current = true
+                        setShowManualBanner(false)
+                        setFollowTrigger(n => n + 1)
+                    }}
                     style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         gap: 6, height: 24,
@@ -383,12 +409,11 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
                 </div>
             )}
 
-            {/* ── 滚动容器：ref + onScroll 都在这个 div 上 ── */}
             <div
                 ref={scrollContainerRef}
-                    onWheel={() => setIsAutoFollow(false)}
-                    onTouchMove={() => setIsAutoFollow(false)}
-                style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${C.borderStrong} transparent` }}
+                onWheel={() => { isAutoFollowRef.current = false; setShowManualBanner(true) }}
+                onTouchMove={() => { isAutoFollowRef.current = false; setShowManualBanner(true) }}
+                style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${C.borderStrong} transparent`, overflowAnchor: 'none' }}
             >
                 {rows.length === 0 ? <EmptyState /> : rows.map((row, idx) => {
                     const onAirSegIdx = rows.findIndex(r =>
@@ -400,10 +425,8 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
                     )
                     
                     const isPreview = !isOnAir && (
-                        // RUN之后，没有onAir，直接用previewPartId所在行
                         (onAirSegIdx === -1 && previewSegIdx === idx && runtime?.previewPartId != null)
                         ||
-                        // 正常播出中
                         (onAirSegIdx >= 0 && (
                             previewSegIdx === idx
                             || (previewSegIdx === -1 && idx === onAirSegIdx + 1)
@@ -429,6 +452,7 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
                         />
                     )
                 })}
+                <div style={{ height: containerHeight }} />
             </div>
             <TotalBar stats={stats} />
         </div>
@@ -555,12 +579,10 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     transition: 'background 0.08s',
                 }}
                 onDragOver={(e) => {
-                    console.log('DRAG OVER')
                     e.preventDefault()
                 }}
                 onMouseEnter={() => setHovered(true)}
                 onMouseLeave={() => setHovered(false)}
-                onDoubleClick={() => console.log('row double click')}
             >
                 {/* PG */}
                 <div style={{
@@ -629,9 +651,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                         if (e.buttons !== 1) return
                         const el     = e.currentTarget
                         const startX = e.pageX - el.scrollLeft
-                        let isDragging = false
                         const onMove = (ev: MouseEvent) => {
-                            isDragging = true
                             el.scrollLeft      = ev.pageX - startX
                             el.style.cursor    = 'grabbing'
                         }
@@ -707,7 +727,13 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                             />
                                         </div>
                                         {partIdx < parts.length - 1 && (
-                                            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>→</div>
+                                            <div style={{
+                                                color: 'rgba(255,255,255,0.7)',
+                                                fontSize: 14,
+                                                animation: (parts[partIdx + 1]._id as string) === runtime?.previewPartId
+                                                    ? 'rcas-blink 1s step-end infinite'
+                                                    : 'none'
+                                            }}>→</div>
                                         )}
                                     </div>
                                 )

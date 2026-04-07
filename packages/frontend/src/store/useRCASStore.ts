@@ -45,6 +45,7 @@ interface RCASStore {
     // 操作
     setPartOverride: (partId: string, sourceId: string) => void
     clearPartOverride: (partId: string) => void
+    addSource: (source: { id: string; label: string; type: string; previewSrc: string; switcherName: string }) => Promise<void>
 
     // 操作
     activate: (id: string) => void
@@ -275,4 +276,24 @@ export const useRCASStore = create<RCASStore>((set) => ({
             if (!result?.ok) console.error('[Socket] CLEAR PART OVERRIDE failed:', result?.error)
         })
     },
+
+    addSource: async (source) => {
+        const res = await fetch('/api/device/config')
+        const config = await res.json()
+        const nextConfig = {
+            ...config,
+            sources: {
+                ...config.sources,
+                [source.id]: source,
+            }
+        }
+        await fetch('/api/device/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nextConfig),
+        })
+        set(state => ({
+            sources: { ...state.sources, [source.id]: source }
+        }))
+    }
 }))

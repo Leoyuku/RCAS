@@ -14,6 +14,9 @@ import { Router, Request, Response } from 'express'
 import { deviceConfigService } from './device-config.service'
 import { playoutController } from '../playout-controller'
 import { tricasterDriver } from '../tricaster/tricaster-driver'
+import fs from 'fs'
+import path from 'path'
+import { config } from '../../../shared/config'
 import { logger } from '../../../shared/logger'
 
 export const deviceConfigRouter = Router()
@@ -128,5 +131,100 @@ deviceConfigRouter.post('/config/rollback/:id', (req: Request, res: Response) =>
     } catch (err: any) {
         logger.error(`[DeviceConfigRouter] Rollback error: ${err.message}`)
         res.status(404).json({ error: err.message })
+    }
+})
+
+// ── GET /api/device/inputs ────────────────────────────────────────────────────
+// 返回 Tricaster 所有已知输入槽位，标注哪些已在 sources 中配置
+deviceConfigRouter.get('/device/inputs', (_req: Request, res: Response) => {
+    try {
+        const slots = tricasterDriver.getSwitcherSlots()
+        const config = deviceConfigService.getConfig()
+
+        const result = [...slots.entries()].map(([id, slot]) => ({
+            id,
+            switcherName:  slot.switcherName,
+            previewSrc:    slot.previewSrc,
+            physicalInput: slot.physicalInput,
+            configured:    id in config.sources,
+        }))
+
+        res.json({ slots: result })
+    } catch (err: any) {
+        logger.error(`[DeviceConfigRouter] GET /device/inputs error: ${err.message}`)
+        res.status(500).json({ error: err.message })
+    }
+})
+
+// ── GET /api/files/browse ─────────────────────────────────────────────────────
+// 浏览目录内容，path 参数为目录路径
+deviceConfigRouter.get('/files/browse', (req: Request, res: Response) => {
+    const dirPath = req.query['path'] as string
+
+    // 没有传 path，返回系统根目录列表
+    // Windows: 各磁盘根目录；其他系统: /
+    if (!dirPath) {
+        if (process.platform === 'win32') {
+            // 返回所有盘符
+            const drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\', 'Z:\\']
+                .filter(d => { try { fs.accessSync(d); return true } catch { return false } })
+                .map(d => ({ name: d, fullPath: d, isDirectory: true }))
+            res.json({ entries: drives, current: '' })
+        } else {
+            res.json({ entries: [{ name: '/', fullPath: '/', isDirectory: true }], current: '' })
+        }
+        return
+    }
+
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+            .map(entry => ({
+                name: entry.name,
+                fullPath: path.join(dirPath, entry.name),
+                isDirectory: entry.isDirectory(),
+            }))
+            .sort((a, b) => {
+                // 目录排前面，同类按名称排序
+                if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+                return a.name.localeCompare(b.name)
+            })
+
+        const parent = path.dirname(dirPath)
+        res.json({
+            entries,
+            current: dirPath,
+            parent: parent !== dirPath ? parent : null, // 到根目录时 parent 为 null
+        })
+    } catch (err: any) {
+        res.status(400).json({ error: err.message })
+    }
+})
+
+// ── POST /api/ddr/load ────────────────────────────────────────────────────────
+// 把文件推送到指定 DDR 通道
+deviceConfigRouter.post('/ddr/load', async (req: Request, res: Response) => {
+    const { channel, filePath } = req.body as { channel: string; filePath: string }
+
+    if (!channel || !filePath) {
+        res.status(400).json({ error: 'channel and filePath required' })
+        return
+    }
+
+    // channel 格式：'ddr1' | 'ddr2' | 'ddr3' | 'ddr4'
+    const shortcutName = `${channel}_add_clips`
+    const tricasterHost = config.tricasterHost
+
+    try {
+        const url = `http://${tricasterHost}/v1/shortcut?name=${shortcutName}&value=${encodeURIComponent(filePath)}`
+        const res2 = await fetch(url)
+        if (!res2.ok) {
+            res.status(502).json({ error: `Tricaster responded ${res2.status}` })
+            return
+        }
+        logger.info(`[DDR] Loaded "${filePath}" into ${channel}`)
+        res.json({ ok: true })
+    } catch (err: any) {
+        logger.error(`[DDR] Failed to load clip: ${err.message}`)
+        res.status(500).json({ error: err.message })
     }
 })

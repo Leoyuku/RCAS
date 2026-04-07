@@ -321,21 +321,41 @@ export class TricasterClient extends EventEmitter<TricasterClientEvents> {
      * 查询 Tricaster 状态，返回原始 XML 字符串
      * ✅ 修正：Tricaster HTTP API 返回 XML，不是 JSON，用 res.text() 接收
      */
-    async fetchStateXml(key: string): Promise<string | null> {
+    async fetchStateXml(key: string, retries = 3, retryDelay = 1000): Promise<string | null> {
         const url = `${this._httpBase}/v1/dictionary?key=${key}`
-        try {
-            const res = await fetch(url)
-            if (!res.ok) {
-                logger.warn(`[TricasterClient] fetchStateXml "${key}" HTTP ${res.status}`)
-                return null
+        let lastError: any
+    
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                const res = await fetch(url)
+                // HTTP 业务错误（4xx/5xx）不重试，直接返回 null
+                if (!res.ok) {
+                    logger.warn(`[TricasterClient] fetchStateXml "${key}" HTTP ${res.status}`)
+                    return null
+                }
+                const xml = await res.text()
+                if (attempt > 1) {
+                    logger.info(`[TricasterClient] fetchStateXml "${key}" succeeded on attempt ${attempt}`)
+                }
+                logger.debug(`[TricasterClient] Fetched XML for key "${key}" (${xml.length} bytes)`)
+                return xml
+            } catch (err: any) {
+                lastError = err
+                // err.code 存在 = 网络错误，值得重试
+                // err.code 不存在 = 其他错误，不重试
+                if (!err.code) {
+                    logger.warn(`[TricasterClient] fetchStateXml "${key}" non-network error: ${err.message}`)
+                    return null
+                }
+                if (attempt < retries) {
+                    logger.warn(`[TricasterClient] fetchStateXml "${key}" attempt ${attempt} failed (${err.code}), retrying in ${retryDelay}ms...`)
+                    await new Promise(resolve => setTimeout(resolve, retryDelay))
+                }
             }
-            const xml = await res.text()
-            logger.debug(`[TricasterClient] Fetched XML for key "${key}" (${xml.length} bytes)`)
-            return xml
-        } catch (err: any) {
-            logger.warn(`[TricasterClient] fetchStateXml "${key}" failed: ${err.message}`)
-            return null
         }
+    
+        logger.warn(`[TricasterClient] fetchStateXml "${key}" failed after ${retries} attempts: ${lastError?.message}`)
+        return null
     }
 
     /**

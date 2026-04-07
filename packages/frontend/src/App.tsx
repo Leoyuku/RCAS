@@ -593,12 +593,15 @@ function RightPanel() {
     // 按 type 分组，动态生成 Tab 列表
     const TAB_LABELS: Record<string, string> = {
         camera: 'CAM',
-        vt:     'Clip',
+        ddr1:   'DDR 1',
+        ddr2:   'DDR 2',
+        ddr3:   'DDR 3',
+        ddr4:   'DDR 4',
         me:     'M/E',
     }
 
     // 从 sources 里提取出现过的类型，按固定顺序排列
-    const TAB_ORDER = ['camera', 'vt', 'me']
+    const TAB_ORDER = ['camera', 'ddr1', 'ddr2', 'ddr3', 'ddr4', 'me']
     const availableTypes = TAB_ORDER.filter(type =>
         Object.values(sources).some(s => s.type === type)
     )
@@ -686,31 +689,44 @@ function RightPanel() {
                     alignContent: 'flex-start',
                     gap: 6,
                 }}>
-                    {currentSources.length === 0 ? (
-                        <div style={{
-                            width: '100%',
-                            textAlign: 'center',
-                            color: COLOR.textDim,
-                            fontSize: 11,
-                            marginTop: 24,
-                            fontFamily: '"JetBrains Mono", monospace',
-                        }}>
-                            无可用源
-                        </div>
-                    ) : currentSources.map(source => (
-                        <SourceCard
-                            key={source.id}
-                            source={source}
-                            isSelected={selectedSourceId === source.id}
-                            tricasterHost={activeTab === 'camera' ? tricasterHost : null}
-                            onSelect={() => setSelectedSourceId(source.id)}
-                            onDragStart={(e) => {
-                                e.dataTransfer.setData('sourceId', source.id)
-                                e.dataTransfer.effectAllowed = 'copy'
-                            }}
-                        />
-                    ))
-                    }
+                    {/* DDR Tab 单独处理 */}
+                    {['ddr1','ddr2','ddr3','ddr4'].includes(activeTab) ? (
+                        <DDRPanel channel={activeTab} />
+                    ) : (
+                        <>
+                            {currentSources.length === 0 && (
+                                <div style={{
+                                    width: '100%',
+                                    textAlign: 'center',
+                                    color: COLOR.textDim,
+                                    fontSize: 11,
+                                    marginTop: 24,
+                                    fontFamily: '"JetBrains Mono", monospace',
+                                }}>
+                                    无可用源
+                                </div>
+                            )}
+                            {currentSources.map(source => (
+                                <SourceCard
+                                    key={source.id}
+                                    source={source}
+                                    isSelected={selectedSourceId === source.id}
+                                    tricasterHost={activeTab === 'camera' ? tricasterHost : null}
+                                    onSelect={() => setSelectedSourceId(source.id)}
+                                    onDragStart={(e) => {
+                                        e.dataTransfer.setData('sourceId', source.id)
+                                        e.dataTransfer.effectAllowed = 'copy'
+                                    }}
+                                />
+                            ))}
+                            {activeTab === 'camera' && (
+                                <AddSourceCard
+                                    existingSourceIds={currentSources.map(s => s.id)}
+                                    tricasterHost={tricasterHost}
+                                />
+                            )}
+                        </>
+                    )}
                 </div>
             </div>
         </div>
@@ -846,6 +862,672 @@ function MonitorPlaceholder({ label, color }: {
             </div>
             <div style={{ fontSize: 11, color: COLOR.textDim }}>
                 — 无信号 —
+            </div>
+        </div>
+    )
+}
+
+function AddSourceCard({ existingSourceIds, tricasterHost }: {
+    existingSourceIds: string[]
+    tricasterHost: string | null
+}) {
+    const [open, setOpen] = useState(false)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const { addSource } = useRCASStore()
+
+    // CAM 号候选列表：CAM1-CAM9 里去掉已配置的
+    const candidates = ['CAM1','CAM2','CAM3','CAM4','CAM5','CAM6','CAM7','CAM8','CAM9']
+        .filter(id => !existingSourceIds.includes(id))
+
+    async function handleSelect(camId: string) {
+        if (!tricasterHost) return
+        setLoading(true)
+        setError(null)
+
+        try {
+            // 查询 Tricaster，验证 iso_label 是否存在
+            const res = await fetch(`/api/device/inputs`)
+            const data = await res.json()
+            const slot = data.slots?.find((s: any) =>
+                s.switcherName?.toUpperCase() === camId.toUpperCase()
+            )
+
+            if (!slot) {
+                setError(`Tricaster 中未找到 ${camId}，请先在 Tricaster 中命名该槽位`)
+                setLoading(false)
+                return
+            }
+
+            // 验证通过，保存到 device-config
+            await addSource({
+                id:          camId,
+                label:       camId,
+                type:        'camera',
+                previewSrc:  slot.previewSrc,
+                switcherName: slot.switcherName,
+            })
+
+            setOpen(false)
+        } catch (err: any) {
+            setError('查询失败，请检查网络连接')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    return (
+        <div style={{ position: 'relative' }}>
+            {/* "+"卡片按钮 */}
+            <div
+                onClick={() => { setOpen(!open); setError(null) }}
+                style={{
+                    width:          '120px',
+                    aspectRatio:    '16/9',
+                    background:     open ? '#2A2A2A' : '#1C1C1C',
+                    border:         `1px dashed ${COLOR.border}`,
+                    borderRadius:   3,
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    cursor:         'pointer',
+                    color:          COLOR.textDim,
+                    fontSize:       22,
+                    fontWeight:     300,
+                    userSelect:     'none',
+                    transition:     'background 0.1s',
+                }}
+            >
+                +
+            </div>
+
+            {/* 下拉选单 */}
+            {open && (
+                <div style={{
+                    position:   'absolute',
+                    top:        '100%',
+                    left:       0,
+                    marginTop:  4,
+                    background: '#1A1A1A',
+                    border:     `1px solid ${COLOR.border}`,
+                    borderRadius: 4,
+                    zIndex:     100,
+                    minWidth:   120,
+                    overflow:   'hidden',
+                }}>
+                    {candidates.length === 0 ? (
+                        <div style={{
+                            padding:    '8px 12px',
+                            fontSize:   11,
+                            color:      COLOR.textDim,
+                            fontFamily: '"JetBrains Mono", monospace',
+                        }}>
+                            无可添加
+                        </div>
+                    ) : candidates.map(camId => (
+                        <div
+                            key={camId}
+                            onClick={() => handleSelect(camId)}
+                            style={{
+                                padding:    '7px 12px',
+                                fontSize:   11,
+                                color:      loading ? COLOR.textDim : COLOR.text,
+                                fontFamily: '"JetBrains Mono", monospace',
+                                cursor:     loading ? 'not-allowed' : 'pointer',
+                                borderBottom: `1px solid ${COLOR.border}`,
+                            }}
+                            onMouseEnter={e => {
+                                if (!loading)
+                                    (e.currentTarget as HTMLDivElement).style.background = '#2A2A2A'
+                            }}
+                            onMouseLeave={e => {
+                                (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                            }}
+                        >
+                            {loading ? '验证中...' : camId}
+                        </div>
+                    ))}
+
+                    {/* 错误提示 */}
+                    {error && (
+                        <div style={{
+                            padding:    '6px 12px',
+                            fontSize:   10,
+                            color:      COLOR.pgm,
+                            fontFamily: '"JetBrains Mono", monospace',
+                            borderTop:  `1px solid ${COLOR.border}`,
+                            lineHeight: 1.4,
+                        }}>
+                            {error}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ─── DDR 面板 ────────────────────────────────────────────────────────────────
+
+interface DDRFile {
+    name:     string
+    fullPath: string
+    selected: boolean
+}
+
+function DDRPanel({ channel }: { channel: string }) {
+    const tricasterHost = useRCASStore(s => s.tricasterHost)
+    const [ddrFiles, setDdrFiles] = useState<Record<string, DDRFile[]>>({
+        DDR1: [], DDR2: [], DDR3: [], DDR4: [],
+    })
+    const [showBrowser, setShowBrowser] = useState(false)
+    const [lastSelected, setLastSelected] = useState<number | null>(null)
+
+    const channelKey = channel.toUpperCase()       // 'DDR1'
+    const channelCmd = channel.toLowerCase()        // 'ddr1'
+    const currentFiles = ddrFiles[channelKey] ?? []
+
+    function handleFileClick(index: number, e: React.MouseEvent) {
+        setDdrFiles(prev => {
+            const files = [...(prev[channelKey] ?? [])]
+
+            if (e.shiftKey && lastSelected !== null) {
+                const from = Math.min(lastSelected, index)
+                const to   = Math.max(lastSelected, index)
+                return {
+                    ...prev,
+                    [channelKey]: files.map((f, i) => ({
+                        ...f,
+                        selected: i >= from && i <= to ? true : f.selected,
+                    }))
+                }
+            } else if (e.ctrlKey || e.metaKey) {
+                return {
+                    ...prev,
+                    [channelKey]: files.map((f, i) => ({
+                        ...f,
+                        selected: i === index ? !f.selected : f.selected,
+                    }))
+                }
+            } else {
+                return {
+                    ...prev,
+                    [channelKey]: files.map((f, i) => ({
+                        ...f,
+                        selected: i === index,
+                    }))
+                }
+            }
+        })
+        setLastSelected(index)
+
+        // 单选时通知 Tricaster 选中该文件
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && tricasterHost) {
+            const file = ddrFiles[channelKey]?.[index]
+            if (file) {
+                fetch(`http://${tricasterHost}/v1/shortcut?name=${channelCmd}_select_file&path=${encodeURIComponent(file.fullPath)}`)
+                    .catch(() => {})
+            }
+        }
+    }
+
+    async function handleFilesSelected(files: { name: string; fullPath: string }[]) {
+        if (!tricasterHost || files.length === 0) return
+
+        const paths = files.map(f => f.fullPath).join('|')
+        await fetch('/api/ddr/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: channelCmd, filePath: paths }),
+        })
+
+        setDdrFiles(prev => ({
+            ...prev,
+            [channelKey]: [
+                ...(prev[channelKey] ?? []),
+                ...files.map(f => ({ ...f, selected: false })),
+            ]
+        }))
+        setShowBrowser(false)
+    }
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+            {/* 添加按钮 */}
+            <div style={{
+                display:      'flex',
+                justifyContent: 'flex-end',
+                padding:      '4px 6px',
+                borderBottom: `1px solid ${COLOR.border}`,
+                flexShrink:   0,
+            }}>
+                <div
+                    onClick={() => setShowBrowser(true)}
+                    style={{
+                        padding:      '4px 10px',
+                        fontSize:     10,
+                        color:        COLOR.pvw,
+                        cursor:       'pointer',
+                        fontFamily:   '"JetBrains Mono", monospace',
+                        border:       `1px solid ${COLOR.pvw}44`,
+                        borderRadius: 2,
+                        userSelect:   'none',
+                    }}
+                >
+                    + 添加
+                </div>
+            </div>
+
+            {/* 文件列表 */}
+            <div style={{
+                flex:         1,
+                overflowY:    'auto',
+                padding:      6,
+                display:      'flex',
+                flexWrap:     'wrap',
+                alignContent: 'flex-start',
+                gap:          6,
+            }}>
+                {currentFiles.length === 0 ? (
+                    <div style={{
+                        width:      '100%',
+                        textAlign:  'center',
+                        color:      COLOR.textDim,
+                        fontSize:   11,
+                        marginTop:  24,
+                        fontFamily: '"JetBrains Mono", monospace',
+                    }}>
+                        暂无文件，点击"+ 添加"
+                    </div>
+                ) : currentFiles.map((file, index) => (
+                    <DDRFileCard
+                        key={file.fullPath + index}
+                        file={file}
+                        index={index}
+                        onClick={(e) => handleFileClick(index, e)}
+                        onDragStart={(e) => {
+                            e.dataTransfer.setData('sourceId', channelKey)
+                            e.dataTransfer.setData('sourceType', 'ddr')
+                            e.dataTransfer.setData('ddrFile', file.fullPath)
+                            e.dataTransfer.effectAllowed = 'copy'
+                        }}
+                    />
+                ))}
+            </div>
+
+            {/* 文件浏览弹窗 */}
+            {showBrowser && (
+                <FileBrowserModal
+                    title={`${channelKey} — 选择文件`}
+                    onConfirm={handleFilesSelected}
+                    onCancel={() => setShowBrowser(false)}
+                />
+            )}
+        </div>
+    )
+}
+
+// ─── DDR 文件卡片 ─────────────────────────────────────────────────────────────
+
+function DDRFileCard({ file, index, onClick, onDragStart }: {
+    file:        DDRFile
+    index:       number
+    onClick:     (e: React.MouseEvent) => void
+    onDragStart: (e: React.DragEvent<HTMLDivElement>) => void
+}) {
+    // 截断文件名
+    const displayName = file.name.length > 14
+        ? file.name.slice(0, 13) + '…'
+        : file.name
+
+    const pgLabel = String(index + 1).padStart(2, '0')
+
+    return (
+        <div
+            draggable
+            onClick={onClick}
+            onDragStart={onDragStart}
+            style={{
+                width:         '120px',
+                aspectRatio:   '16/9',
+                background:    file.selected ? '#2A3A2A' : '#1C1C1C',
+                border:        `1px solid ${file.selected ? COLOR.pvw : COLOR.border}`,
+                borderRadius:  3,
+                display:       'flex',
+                flexDirection: 'column',
+                alignItems:    'center',
+                justifyContent:'center',
+                cursor:        'grab',
+                position:      'relative',
+                overflow:      'hidden',
+                userSelect:    'none',
+            }}
+        >
+            {/* 视频图标占位（联调后替换为真实缩略图） */}
+            <div style={{ fontSize: 20, opacity: 0.3 }}>🎬</div>
+
+            {/* 底部标签：序号 + 文件名 */}
+            <div style={{
+                position:      'absolute',
+                bottom:        0,
+                left:          0,
+                right:         0,
+                padding:       '2px 4px',
+                background:    'rgba(0,0,0,0.75)',
+                fontSize:      9,
+                fontWeight:    700,
+                color:         COLOR.text,
+                fontFamily:    '"JetBrains Mono", monospace',
+                letterSpacing: '0.04em',
+                display:       'flex',
+                gap:           4,
+                alignItems:    'center',
+            }}>
+                <span style={{ color: COLOR.textDim, flexShrink: 0 }}>{pgLabel}</span>
+                <span style={{
+                    overflow:     'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace:   'nowrap',
+                }}>
+                    {displayName}
+                </span>
+            </div>
+
+            {/* 选中高亮遮罩 */}
+            {file.selected && (
+                <div style={{
+                    position:      'absolute',
+                    inset:         0,
+                    border:        `2px solid ${COLOR.pvw}`,
+                    borderRadius:  3,
+                    pointerEvents: 'none',
+                }}/>
+            )}
+        </div>
+    )
+}
+
+// ─── 文件浏览弹窗 ─────────────────────────────────────────────────────────────
+
+interface FileEntry {
+    name:        string
+    fullPath:    string
+    isDirectory: boolean
+}
+
+function FileBrowserModal({ title, onConfirm, onCancel }: {
+    title:     string
+    onConfirm: (files: { name: string; fullPath: string }[]) => void
+    onCancel:  () => void
+}) {
+    const [currentPath, setCurrentPath]   = useState<string>('')
+    const [entries, setEntries]           = useState<FileEntry[]>([])
+    const [parent, setParent]             = useState<string | null>(null)
+    const [selected, setSelected]         = useState<Set<string>>(new Set())
+    const [lastClicked, setLastClicked]   = useState<number | null>(null)
+    const [loading, setLoading]           = useState(false)
+    const [error, setError]               = useState<string | null>(null)
+
+    // 初始加载根目录
+    useEffect(() => { browse('') }, [])
+
+    async function browse(path: string) {
+        setLoading(true)
+        setError(null)
+        try {
+            const url = path ? `/api/files/browse?path=${encodeURIComponent(path)}` : '/api/files/browse'
+            const res  = await fetch(url)
+            const data = await res.json()
+            if (data.error) { setError(data.error); return }
+            setEntries(data.entries ?? [])
+            setCurrentPath(data.current ?? path)
+            setParent(data.parent ?? null)
+            setSelected(new Set())
+            setLastClicked(null)
+        } catch {
+            setError('无法读取目录')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    function handleEntryClick(entry: FileEntry, _index: number, e: React.MouseEvent) {
+        if (entry.isDirectory) {
+            browse(entry.fullPath)
+            return
+        }
+
+        // 文件选择，支持 Shift/Ctrl 多选
+        const fileEntries = entries.filter(e => !e.isDirectory)
+        const fileIndex   = fileEntries.indexOf(entry)
+
+        setSelected(prev => {
+            const next = new Set(prev)
+            if (e.shiftKey && lastClicked !== null) {
+                const from = Math.min(lastClicked, fileIndex)
+                const to   = Math.max(lastClicked, fileIndex)
+                fileEntries.slice(from, to + 1).forEach(f => next.add(f.fullPath))
+            } else if (e.ctrlKey || e.metaKey) {
+                next.has(entry.fullPath) ? next.delete(entry.fullPath) : next.add(entry.fullPath)
+            } else {
+                next.clear()
+                next.add(entry.fullPath)
+            }
+            return next
+        })
+        setLastClicked(fileIndex)
+    }
+
+    function handleConfirm() {
+        const selectedFiles = entries
+            .filter(e => !e.isDirectory && selected.has(e.fullPath))
+            .map(e => ({ name: e.name, fullPath: e.fullPath }))
+        if (selectedFiles.length > 0) onConfirm(selectedFiles)
+    }
+
+    // 视频文件扩展名
+    const VIDEO_EXT = ['.mp4', '.mov', '.avi', '.mxf', '.mkv', '.wmv', '.m4v']
+    const isVideo = (name: string) =>
+        VIDEO_EXT.some(ext => name.toLowerCase().endsWith(ext))
+
+    return (
+        <div
+            style={{
+                position:   'fixed',
+                inset:      0,
+                zIndex:     200,
+                background: 'rgba(0,0,0,0.7)',
+                display:    'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+            }}
+            onClick={onCancel}
+        >
+            <div
+                style={{
+                    width:        520,
+                    maxHeight:    480,
+                    background:   '#151515',
+                    border:       `1px solid ${COLOR.border}`,
+                    borderRadius: 6,
+                    display:      'flex',
+                    flexDirection:'column',
+                    overflow:     'hidden',
+                }}
+                onClick={e => e.stopPropagation()}
+            >
+                {/* 标题栏 */}
+                <div style={{
+                    padding:      '10px 16px',
+                    borderBottom: `1px solid ${COLOR.border}`,
+                    fontFamily:   '"JetBrains Mono", monospace',
+                    fontSize:     11,
+                    fontWeight:   700,
+                    color:        COLOR.text,
+                    letterSpacing:'0.08em',
+                }}>
+                    {title}
+                </div>
+
+                {/* 当前路径 */}
+                <div style={{
+                    padding:      '5px 16px',
+                    borderBottom: `1px solid ${COLOR.border}`,
+                    fontFamily:   '"JetBrains Mono", monospace',
+                    fontSize:     9,
+                    color:        COLOR.textDim,
+                    letterSpacing:'0.04em',
+                    whiteSpace:   'nowrap',
+                    overflow:     'hidden',
+                    textOverflow: 'ellipsis',
+                }}>
+                    {currentPath || '根目录'}
+                </div>
+
+                {/* 文件列表 */}
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {loading && (
+                        <div style={{
+                            padding:    '20px',
+                            textAlign:  'center',
+                            color:      COLOR.textDim,
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize:   11,
+                        }}>
+                            加载中...
+                        </div>
+                    )}
+
+                    {error && (
+                        <div style={{
+                            padding:    '20px',
+                            textAlign:  'center',
+                            color:      COLOR.pgm,
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize:   11,
+                        }}>
+                            {error}
+                        </div>
+                    )}
+
+                    {/* 返回上级 */}
+                    {!loading && parent !== null && (
+                        <div
+                            onClick={() => browse(parent)}
+                            style={{
+                                padding:      '7px 16px',
+                                display:      'flex',
+                                alignItems:   'center',
+                                gap:          8,
+                                cursor:       'pointer',
+                                borderBottom: `1px solid ${COLOR.border}`,
+                                color:        COLOR.textDim,
+                                fontSize:     12,
+                                fontFamily:   '"JetBrains Mono", monospace',
+                            }}
+                            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#2A2A2A'}
+                            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
+                        >
+                            <span>📁</span>
+                            <span>..</span>
+                        </div>
+                    )}
+
+                    {/* 目录和文件列表 */}
+                    {!loading && entries.map((entry, index) => {
+                        const isSelected = !entry.isDirectory && selected.has(entry.fullPath)
+                        const show = entry.isDirectory || isVideo(entry.name)
+                        if (!show) return null
+
+                        return (
+                            <div
+                                key={entry.fullPath}
+                                onClick={(e) => handleEntryClick(entry, index, e)}
+                                style={{
+                                    padding:      '7px 16px',
+                                    display:      'flex',
+                                    alignItems:   'center',
+                                    gap:          8,
+                                    cursor:       entry.isDirectory ? 'pointer' : 'default',
+                                    borderBottom: `1px solid ${COLOR.border}`,
+                                    background:   isSelected ? `${COLOR.pvw}22` : 'transparent',
+                                    color:        isSelected ? COLOR.pvw : entry.isDirectory ? COLOR.textDim : COLOR.text,
+                                    fontSize:     12,
+                                    fontFamily:   '"JetBrains Mono", monospace',
+                                }}
+                                onMouseEnter={e => {
+                                    if (!isSelected)
+                                        (e.currentTarget as HTMLDivElement).style.background = '#2A2A2A'
+                                }}
+                                onMouseLeave={e => {
+                                    (e.currentTarget as HTMLDivElement).style.background = isSelected ? `${COLOR.pvw}22` : 'transparent'
+                                }}
+                            >
+                                <span>{entry.isDirectory ? '📁' : '🎬'}</span>
+                                <span style={{
+                                    flex:         1,
+                                    overflow:     'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace:   'nowrap',
+                                }}>
+                                    {entry.name}
+                                </span>
+                                {isSelected && <span style={{ fontSize: 10, color: COLOR.pvw }}>✓</span>}
+                            </div>
+                        )
+                    })}
+                </div>
+
+                {/* 底部按钮栏 */}
+                <div style={{
+                    padding:      '10px 16px',
+                    borderTop:    `1px solid ${COLOR.border}`,
+                    display:      'flex',
+                    alignItems:   'center',
+                    justifyContent: 'space-between',
+                }}>
+                    <span style={{
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize:   10,
+                        color:      COLOR.textDim,
+                    }}>
+                        {selected.size > 0 ? `已选 ${selected.size} 个文件` : '未选择文件'}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                            onClick={onCancel}
+                            style={{
+                                padding:    '5px 16px',
+                                background: 'transparent',
+                                border:     `1px solid ${COLOR.border}`,
+                                borderRadius: 2,
+                                color:      COLOR.textDim,
+                                fontSize:   12,
+                                cursor:     'pointer',
+                                fontFamily: '"JetBrains Mono", monospace',
+                            }}
+                        >
+                            取消
+                        </button>
+                        <button
+                            onClick={handleConfirm}
+                            disabled={selected.size === 0}
+                            style={{
+                                padding:    '5px 16px',
+                                background: selected.size > 0 ? `${COLOR.pvw}22` : 'transparent',
+                                border:     `1px solid ${selected.size > 0 ? COLOR.pvw : COLOR.border}`,
+                                borderRadius: 2,
+                                color:      selected.size > 0 ? COLOR.pvw : COLOR.textDim,
+                                fontSize:   12,
+                                fontWeight: 700,
+                                cursor:     selected.size > 0 ? 'pointer' : 'not-allowed',
+                                fontFamily: '"JetBrains Mono", monospace',
+                            }}
+                        >
+                            确认
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     )
