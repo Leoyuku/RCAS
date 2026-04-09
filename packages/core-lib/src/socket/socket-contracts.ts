@@ -9,6 +9,7 @@
  *   core-lib  ←  backend (socket-server.ts)
  *   core-lib  ←  frontend (store)
  *   backend   ✗  frontend  （禁止直接依赖）
+ * 后端 socket-server.ts 和前端 store 都从这里引入，永远不会漂移。
  */
 
 import { IRundown } from '../models/rundown-model';  // ← 唯一改动，../ 而不是 ./
@@ -38,7 +39,7 @@ export interface ServerToClientEvents {
     'runtime:state': (payload: RundownRuntime) => void;
     'rundown:lifecycle': (payload: { id: string; lifecycle: LifecycleStatus }) => void;
     'runtime:overrides': (payload: {
-        overrides: Array<{ partId: string; sourceId: string; createdAt: number }>
+    overrides: Array<{ partId: string; sourceId: string; ddrFile?: string; createdAt: number }>
     }) => void;
 }
 
@@ -53,8 +54,8 @@ export interface ClientToServerEvents {
     'intent:sendToPreview': (callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:setNext':       (payload: { partId: string }, callback?: (result: { ok: boolean; error?: string }) => void) => void;
     'intent:setPartOverride': (
-        payload: { partId: string; sourceId: string },
-        callback?: (result: { ok: boolean; error?: string }) => void
+    payload: { partId: string; sourceId: string; ddrFile?: string },
+    callback?: (result: { ok: boolean; error?: string }) => void
     ) => void;
 
     'intent:clearPartOverride': (

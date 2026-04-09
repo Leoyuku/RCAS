@@ -19,16 +19,17 @@ import { logger } from '../../shared/logger'
 export interface PartOverride {
     partId: string
     sourceId: string
+    ddrFile?: string      // ← 新增：DDR 覆盖时的文件路径
     createdAt: number
 }
 
 class RuntimeOverrideStore {
     private _overrides = new Map<string, PartOverride>()
 
-    set(partId: string, sourceId: string): PartOverride {
-        const override: PartOverride = { partId, sourceId, createdAt: Date.now() }
+    set(partId: string, sourceId: string, ddrFile?: string): PartOverride {
+        const override: PartOverride = { partId, sourceId, ddrFile, createdAt: Date.now() }
         this._overrides.set(partId, override)
-        logger.info(`[RuntimeOverrideStore] Set override: part="${partId}" → source="${sourceId}"`)
+        logger.info(`[RuntimeOverrideStore] Set override: part="${partId}" → source="${sourceId}"${ddrFile ? ` file="${ddrFile}"` : ''}`)
         return override
     }
 

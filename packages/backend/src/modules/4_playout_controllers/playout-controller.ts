@@ -32,11 +32,12 @@ import { runtimeOverrideStore } from './runtime-override-store'
 interface PartPlayoutIntent {
     partId: string
     partType: PartType
-    sourceId: string | null   // 逻辑源 ID（'CAM1'、'VT_A'），null = 未知
-    clipId: string | null   // 素材 ID（VT/SERVER 类型），null = 无素材
+    sourceId: string | null
+    clipId: string | null
+    ddrFile: string | null
     proxyPath: string | null
-    l3rdPiece: IPiece | null   // L3RD 字幕 Piece，null = 无字幕
-    bugPiece: IPiece | null   // BUG 台标 Piece，null = 无台标
+    l3rdPiece: IPiece | null
+    bugPiece: IPiece | null
 }
 
 // ─── PlayoutController ────────────────────────────────────────────────────────
@@ -193,7 +194,17 @@ export class PlayoutController {
             logger.warn('[PlayoutController] No videoServer driver, falling back to input switch')
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
-                if (source?.switcherName) await (this._switcher as any).setPreview(source.switcherName)
+                const sourceType = source?.type ?? ''
+        
+                if (sourceType.startsWith('ddr') && intent.ddrFile) {
+                    // DDR 两步：先选文件，再切预监
+                    const ddrCmd = sourceType  // 'ddr1' / 'ddr2' / 'ddr3' / 'ddr4'
+                    await (this._switcher as any).sendShortcut(`${ddrCmd}_select_file`, intent.ddrFile)
+                    logger.info(`[PlayoutController] DDR select file: ${ddrCmd} → "${intent.ddrFile}"`)
+                    await (this._switcher as any).setPreview(source.switcherName)
+                } else if (source?.switcherName) {
+                    await (this._switcher as any).setPreview(source.switcherName)
+                }
             }
             await this._switcher.take()
             return
@@ -313,11 +324,15 @@ export class PlayoutController {
             p.sourceLayerId === 'bug'
         ) ?? null
 
+        const ddrFile: string | null =
+            runtimeOverrideStore.get(part._id)?.ddrFile ?? null
+
         return {
             partId: part._id,
             partType: part.type as PartType,
             sourceId,
             clipId,
+            ddrFile,
             proxyPath,
             l3rdPiece,
             bugPiece,

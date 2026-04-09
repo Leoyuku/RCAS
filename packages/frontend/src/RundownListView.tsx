@@ -496,7 +496,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
     ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled }, ref) => {
         const [hovered, setHovered] = useState(false)
         // ── 覆盖相关 ──────────────────────────────────────────────────────────────
-        const partOverrides    = useRCASStore(s => s.partOverrides)
+        const partOverrides = useRCASStore(s => s.overrides)
         const setPartOverride  = useRCASStore(s => s.setPartOverride)
         const clearPartOverride = useRCASStore(s => s.clearPartOverride)
 
@@ -518,8 +518,8 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
         // 按 partType 过滤同类型源
         const SOURCE_TYPE_MAP: Record<string, string[]> = {
             [PartType.KAM]:    ['camera'],
-            [PartType.SERVER]: ['vt'],
-            [PartType.VO]:     ['vt'],
+            [PartType.SERVER]: ['vt', 'ddr1', 'ddr2', 'ddr3', 'ddr4'],
+            [PartType.VO]:     ['vt', 'ddr1', 'ddr2', 'ddr3', 'ddr4'],
             [PartType.LIVE]:   ['camera'],
         }
 
@@ -670,7 +670,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                 const partId = part._id as string
                                 const isPartOnAir = partId === runtime?.onAirPartId
                                 const isPartPreview = partId === runtime?.previewPartId
-                                const isOverride = partOverrides.has(partId)
+                                const isOverride = !!partOverrides[partId]
 
                                 // 从 pieces 里取主 Piece 的数据
                                 const mainPiece = part.pieces?.find(p => {
@@ -712,7 +712,8 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 if (!droppedSource) return
                                                 const allowedTypes = SOURCE_TYPE_MAP[part.type] ?? []
                                                 if (!allowedTypes.includes(droppedSource.type)) return
-                                                setPartOverride(partId, sourceId)
+                                                const ddrFile = e.dataTransfer.getData('ddrFile') || undefined
+                                                setPartOverride(partId, sourceId, ddrFile)
                                             }}
                                             style={{ position: 'relative', display: 'inline-block' }}
                                         >
@@ -756,7 +757,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                             {AVAILABLE_SOURCES
                                 .filter(s => (SOURCE_TYPE_MAP[ctxMenu.partType] ?? []).includes(s.type))
                                 .map(source => {
-                                    const isSelected = partOverrides.get(ctxMenu.partId) === source.id
+                                    const isSelected = partOverrides[ctxMenu.partId]?.sourceId === source.id
                                     return (
                                         <div
                                             key={source.id}
@@ -776,7 +777,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                     )
                                 })
                             }
-                            {partOverrides.has(ctxMenu.partId) && (
+                            {!!partOverrides[ctxMenu.partId] && (
                                 <>
                                     <div style={{ height: 1, background: '#2d3848', margin: '4px 0' }} />
                                     <div
