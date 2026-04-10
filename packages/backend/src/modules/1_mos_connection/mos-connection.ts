@@ -274,8 +274,8 @@ export class MosConnector {
 
         mosDevice.onCreateRunningOrder(async (ro: IMOSRunningOrder) =>
             safeRoAck(deviceID, 'onCreateRunningOrder', ro.ID!, async () => {
-                mosCache.handleCreateRunningOrder(ro);
-                return makeRoAck(ro.ID!);
+                mosCache.handleCreateRunningOrder(ro)
+                return makeRoAck(ro.ID!)
             })
         );
 

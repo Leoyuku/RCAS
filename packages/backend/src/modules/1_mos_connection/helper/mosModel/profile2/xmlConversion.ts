@@ -246,6 +246,16 @@ export namespace XMLMosItem {
 				// Note: the <mosObj> is sent in roStorySend
 				item.MosObjects = ensureArray(xml.mosObj).map((obj) => XMLMosObjects.fromXML('mosObj', obj, strict))
 			}
+
+			// 透传 Octopus 扩展字段（octext_ 前缀）
+			// 这些字段不在 MOS 标准 schema 里，但 Octopus 用它们标识元素类型
+			if (has(xml, 'octext_elemType')) {
+				item.octext_elemType = mosTypes.string.createOptional(xml.octext_elemType, 'octext_elemType')
+			}
+			if (has(xml, 'octext_elemLabel')) {
+				item.octext_elemLabel = mosTypes.string.createOptional(xml.octext_elemLabel, 'octext_elemLabel')
+			}
+
 			omitUndefined(item)
 			return item
 		} catch (e) {
@@ -276,6 +286,10 @@ export namespace XMLMosItem {
 		if (item.MacroIn) addTextElementInternal(xmlItem, 'macroIn', item.MacroIn, undefined, strict)
 		if (item.MacroOut) addTextElementInternal(xmlItem, 'macroOut', item.MacroOut, undefined, strict)
 
+		// 透传 Octopus 扩展字段（octext_ 前缀）
+		if ((item as any).octext_elemType) addTextElementInternal(xmlItem, 'octext_elemType', (item as any).octext_elemType, undefined, strict)
+		if ((item as any).octext_elemLabel) addTextElementInternal(xmlItem, 'octext_elemLabel', (item as any).octext_elemLabel, undefined, strict)
+		
 				// TODO: MosObjects
 	}
 }
@@ -325,7 +339,20 @@ export namespace XMLObjectPaths {
 			}
 
 			process(xmlPaths.objPath, IMOSObjectPathType.PATH)
-			process(xmlPaths.objProxyPath, IMOSObjectPathType.PROXY_PATH)
+
+			// objProxyPath 有两种：techDescription="Proxy"(mp4) 和 techDescription="JPG"(缩略图)
+			// 把 JPG 类型映射到 METADATA_PATH，以便下游通过 Type 区分
+			const objProxyPaths = ensureArray(xmlPaths.objProxyPath)
+			for (const p of objProxyPaths) {
+				const pObj = ensureXMLObject(p, strict) as any
+				const techDesc: string = pObj?.attributes?.techDescription ?? ''
+				if (techDesc === 'JPG') {
+					process(p, IMOSObjectPathType.METADATA_PATH)
+				} else {
+					process(p, IMOSObjectPathType.PROXY_PATH)
+				}
+			}
+
 			process(xmlPaths.objMetadataPath, IMOSObjectPathType.METADATA_PATH)
 
 			return paths
