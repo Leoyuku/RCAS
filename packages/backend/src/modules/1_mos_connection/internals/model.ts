@@ -112,6 +112,7 @@ export interface IMOSItem {
 	// Octopus 扩展字段（octext_ 前缀），标准 MOS 不含，需在 xmlConversion 层显式透传
     octext_elemType?: string   // 元素类型: studio / video / vo / legacyvideo / jingle
     octext_elemLabel?: string  // 显示标签: STUDIO / VIDEO / VO / INTRO / LEGACY / JINGLE
+	camSourceId?: string       // 从主播词 <<CAM X>> 解析出的摄像机 sourceId，如 'CAM1'
 }
 
 export interface IMOSAck {

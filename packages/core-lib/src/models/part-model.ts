@@ -51,6 +51,13 @@ export interface IPart {
     type: PartType;
 
     /**
+     * 播出源 ID（对应 device-config.json 里的 source key）
+     * studio 类型：从主播词 <<CAM X>> 解析，如 'CAM1'、'CAM2'
+     * 其他类型：null（由 _resolvePartIntent() 决定）
+     */
+    sourceId?: string | null;
+
+    /**
      * 包含的 Pieces (在运行时可能会被 populate，或者单独查询)
      * 在数据库存储模型中，这通常是分离的；但在内存模型中可能包含。
      */

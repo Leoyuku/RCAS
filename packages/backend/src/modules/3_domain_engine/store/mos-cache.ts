@@ -32,6 +32,7 @@ import {
 } from '../../1_mos_connection/internals/model';
 import { getMosTypes } from '../../1_mos_connection/internals/mosTypes';
 import { logger } from '../../../shared/logger';
+import { AnyXMLValue } from '../../1_mos_connection/internals/xmlParse';
 
 const mosTypes = getMosTypes(false);
 
@@ -327,15 +328,15 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
     handleRunningOrderStory(story: IMOSROFullStory): void {
         const roID    = mosTypes.mosString128.stringify(story.RunningOrderId);
         const storyID = mosTypes.mosString128.stringify(story.ID);
-
+    
         logger.info(`[MosCache] roStorySend: "${roID}"/"${storyID}", body items: ${story.Body.length}`);
-
+    
         const ro = this._rundowns.get(roID);
         if (!ro) {
             logger.warn(`[MosCache] roStorySend: RO "${roID}" not found in cache`);
             return;
         }
-
+    
         const cachedStory = ro.Stories.find(
             s => mosTypes.mosString128.stringify(s.ID) === storyID
         );
@@ -343,51 +344,63 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
             logger.warn(`[MosCache] roStorySend: story "${storyID}" not found in RO "${roID}"`);
             return;
         }
-
-        // story.Body 包含完整的 storyItem 列表（含 MosObjects、路径、时长等）
-        // 遍历 Body，找到 storyItem 类型的条目，将其 MosObjects 合并进缓存的对应 Item
-        let mergedCount = 0;
+    
+        let mergedCount = 0
+        let lastStudioItem: IMOSItem | null = null
+    
         for (const bodyItem of story.Body) {
-            if (bodyItem.itemType !== 'storyItem') continue;
-
-            const fullItem = bodyItem.Content;
-            const fullItemID = mosTypes.mosString128.stringify(fullItem.ID);
-
-            // 在缓存的 Story.Items 里找到对应的 Item
-            const cachedItem = cachedStory.Items.find(
-                i => mosTypes.mosString128.stringify(i.ID) === fullItemID
-            );
-
-            if (!cachedItem) {
-                // roStorySend 可能包含 roCreate 时还没有的新 Item，直接追加
-                logger.debug(`[MosCache] roStorySend: item "${fullItemID}" not in cache, appending`);
-                cachedStory.Items.push(fullItem);
-                mergedCount++;
-                continue;
+            if (bodyItem.itemType === 'storyItem') {
+                const fullItem   = bodyItem.Content
+                const fullItemID = mosTypes.mosString128.stringify(fullItem.ID)
+    
+                const cachedItem = cachedStory.Items.find(
+                    i => mosTypes.mosString128.stringify(i.ID) === fullItemID
+                )
+    
+                if (!cachedItem) {
+                    logger.debug(`[MosCache] roStorySend: item "${fullItemID}" not in cache, appending`)
+                    cachedStory.Items.push(fullItem)
+                    mergedCount++
+                    lastStudioItem = (fullItem.octext_elemType === 'studio') ? fullItem : null
+                    continue
+                }
+    
+                // 合并完整数据
+                if (fullItem.MosObjects && fullItem.MosObjects.length > 0) {
+                    cachedItem.MosObjects = fullItem.MosObjects
+                }
+                if (fullItem.Paths && fullItem.Paths.length > 0) {
+                    cachedItem.Paths = fullItem.Paths
+                }
+                if (fullItem.EditorialDuration !== undefined) {
+                    cachedItem.EditorialDuration = fullItem.EditorialDuration
+                }
+                if (fullItem.UserTimingDuration !== undefined) {
+                    cachedItem.UserTimingDuration = fullItem.UserTimingDuration
+                }
+                if (fullItem.MosExternalMetaData && fullItem.MosExternalMetaData.length > 0) {
+                    cachedItem.MosExternalMetaData = fullItem.MosExternalMetaData
+                }
+                mergedCount++
+    
+                // 追踪最近的 studio item，等待后续 <pi> CAM 标注
+                lastStudioItem = (cachedItem.octext_elemType === 'studio') ? cachedItem : null
+    
+            } else {
+                // itemType === 'other'：检查 <p><pi>CAM X</pi></p>
+                if (bodyItem.Type === 'p' && lastStudioItem) {
+                    const camSourceId = extractCamSourceId(bodyItem.Content)
+                    if (camSourceId) {
+                        lastStudioItem.camSourceId = camSourceId
+                        logger.info(`[MosCache] roStorySend: "${storyID}" item "${mosTypes.mosString128.stringify(lastStudioItem.ID)}" → camSourceId="${camSourceId}"`)
+                        lastStudioItem = null  // 找到后重置，避免重复写入
+                    }
+                }
             }
-
-            // 将完整数据合并进缓存 Item（MosObjects 是最关键的，含路径和状态）
-            if (fullItem.MosObjects && fullItem.MosObjects.length > 0) {
-                cachedItem.MosObjects = fullItem.MosObjects;
-            }
-            // 同步其他可能更新的字段
-            if (fullItem.Paths && fullItem.Paths.length > 0) {
-                cachedItem.Paths = fullItem.Paths;
-            }
-            if (fullItem.EditorialDuration !== undefined) {
-                cachedItem.EditorialDuration = fullItem.EditorialDuration;
-            }
-            if (fullItem.UserTimingDuration !== undefined) {
-                cachedItem.UserTimingDuration = fullItem.UserTimingDuration;
-            }
-            if (fullItem.MosExternalMetaData && fullItem.MosExternalMetaData.length > 0) {
-                cachedItem.MosExternalMetaData = fullItem.MosExternalMetaData;
-            }
-            mergedCount++;
         }
-
-        logger.info(`[MosCache] roStorySend merged ${mergedCount} item(s) into story "${storyID}"`);
-        this.emit('storyChanged', roID, 'fullStory', JSON.parse(JSON.stringify(ro)));
+    
+        logger.info(`[MosCache] roStorySend merged ${mergedCount} item(s) into story "${storyID}"`)
+        this.emit('storyChanged', roID, 'fullStory', JSON.parse(JSON.stringify(ro)))
     }
 
     // ── 私有工具方法 ──────────────────────────────────────────────────────────
@@ -421,6 +434,30 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
         if (!story) logger.warn(`[MosCache] ${op}: story "${storyID}" not found in RO "${roID}".`);
         return story;
     }
+}
+
+// ─── CAM 标注提取 ─────────────────────────────────────────────────────────────
+
+/**
+ * 从 <p> 节点的 Content 里提取 <pi>CAM X</pi> 标注。
+ * xml2js 解析后结构：{ pi: ['CAM 1'], _: '...' } 或 { pi: 'CAM 1' }
+ * 返回标准化的 sourceId，如 'CAM1'、'CAM2'，找不到返回 null。
+ */
+function extractCamSourceId(content: AnyXMLValue): string | null {
+    if (!content || typeof content !== 'object' || Array.isArray(content)) return null
+
+    const obj = content as Record<string, AnyXMLValue>
+    const piRaw = obj['pi']
+    if (!piRaw) return null
+
+    const piStr = Array.isArray(piRaw)
+        ? String(piRaw[0] ?? '')
+        : String(piRaw)
+
+    const match = piStr.trim().match(/^CAM\s*(\d+)$/i)
+    if (!match) return null
+
+    return `CAM${match[1]}`
 }
 
 // ─── 全局单例 ─────────────────────────────────────────────────────────────────
