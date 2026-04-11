@@ -37,6 +37,7 @@ interface RCASStore {
     runtime: RundownRuntime | null
     overrides: Record<string, PartOverride>
     tricasterHost: string | null
+    tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
     sources: Record<string, { id: string; label: string; type: string }>
 
     activate: (id: string) => void
@@ -65,6 +66,7 @@ export const useRCASStore = create<RCASStore>((set) => ({
     overrides: {},
     sources: {},
     tricasterHost: null,
+    tricasterStatus: 'DISCONNECTED',
 
     _initSocket: () => {
         if (socket) return
@@ -179,6 +181,10 @@ export const useRCASStore = create<RCASStore>((set) => ({
             const map: Record<string, PartOverride> = {}
             for (const o of overrides) map[o.partId] = o
             set({ overrides: map })
+        })
+
+        socket.on('device:status', ({ tricaster }) => {
+            set({ tricasterStatus: tricaster })
         })
     },
 

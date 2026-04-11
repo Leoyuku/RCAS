@@ -392,7 +392,6 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
                     const camSourceId = extractCamSourceId(bodyItem.Content)
                     if (camSourceId) {
                         lastStudioItem.camSourceId = camSourceId
-                        logger.info(`[MosCache] roStorySend: "${storyID}" item "${mosTypes.mosString128.stringify(lastStudioItem.ID)}" → camSourceId="${camSourceId}"`)
                         lastStudioItem = null  // 找到后重置，避免重复写入
                     }
                 }
@@ -444,20 +443,50 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
  * 返回标准化的 sourceId，如 'CAM1'、'CAM2'，找不到返回 null。
  */
 function extractCamSourceId(content: AnyXMLValue): string | null {
-    if (!content || typeof content !== 'object' || Array.isArray(content)) return null
+    if (!content) return null
 
+    // ── 情况1：纯字符串（QuickMOS 测试数据，或简单 <p> 文本节点）──
+    // 直接从字符串开头匹配 CAM X
+    if (typeof content === 'string') {
+        const match = content.trim().match(/^CAM\s*(\d+)/i)
+        return match ? `CAM${match[1]}` : null
+    }
+
+    if (typeof content !== 'object' || Array.isArray(content)) return null
     const obj = content as Record<string, AnyXMLValue>
+
+    // ── 情况2：Sofie 库解析后的文本节点 { $name, $type, text } ──
+    // QuickMOS 序列化后的结构，text 字段可能是字符串或对象
+    if (obj['text'] !== undefined) {
+        const text = obj['text']
+        if (typeof text === 'string') {
+            const match = text.trim().match(/^CAM\s*(\d+)/i)
+            return match ? `CAM${match[1]}` : null
+        }
+        // text 本身是对象（嵌套的 pi 节点）→ 递归处理
+        return extractCamSourceId(text)
+    }
+
+    // ── 情况3：xml2js 解析的原始对象 { pi: ['CAM 1'], _: '...' } ──
+    // 真实 Octopus TCP 推送解析后可能的结构
     const piRaw = obj['pi']
-    if (!piRaw) return null
+    if (piRaw) {
+        const piStr = Array.isArray(piRaw)
+            ? String(piRaw[0] ?? '')
+            : String(piRaw)
+        const match = piStr.trim().match(/^CAM\s*(\d+)$/i)
+        return match ? `CAM${match[1]}` : null
+    }
 
-    const piStr = Array.isArray(piRaw)
-        ? String(piRaw[0] ?? '')
-        : String(piRaw)
+    // ── 情况4：{ $name: 'p', children: [...] } 或其他嵌套结构 ──
+    // 遍历所有值，递归查找
+    for (const val of Object.values(obj)) {
+        if (!val) continue
+        const result = extractCamSourceId(val)
+        if (result) return result
+    }
 
-    const match = piStr.trim().match(/^CAM\s*(\d+)$/i)
-    if (!match) return null
-
-    return `CAM${match[1]}`
+    return null
 }
 
 // ─── 全局单例 ─────────────────────────────────────────────────────────────────

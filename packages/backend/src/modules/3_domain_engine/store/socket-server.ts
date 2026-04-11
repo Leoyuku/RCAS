@@ -27,6 +27,7 @@ import { rundownStore }                     from './rundown-store';
 import { runtimeOverrideStore } from '../../4_playout_controllers/runtime-override-store'
 import { logger }                           from '../../../shared/logger';
 import { ServerToClientEvents, ClientToServerEvents } from '../../../../../core-lib/src/socket/socket-contracts';
+import { tricasterDriver } from '../../4_playout_controllers/tricaster/tricaster-driver'
 
 // ─── 类型定义（前端可复用） ───────────────────────────────────────────────────
 
@@ -82,6 +83,9 @@ export class SocketServer {
             // 补推当前覆盖状态
             const currentOverrides = runtimeOverrideStore.getAll()
             if (currentOverrides.length > 0) {
+                // 补推 Tricaster 当前连接状态
+                socket.emit('device:status', { tricaster: tricasterDriver.connectionStatus })
+                // 补推当前覆盖状态
                 socket.emit('runtime:overrides', { overrides: currentOverrides })
             }
 
@@ -201,6 +205,12 @@ export class SocketServer {
             logger.debug(`[SocketServer] Broadcasting rundown:lifecycle → ${id} (${lifecycle})`);
             this._io.emit('rundown:lifecycle', { id, lifecycle });
         });
+
+        // 订阅 Tricaster 连接状态变化
+        tricasterDriver.on('statusChanged', (status) => {
+            logger.debug(`[SocketServer] Broadcasting device:status → tricaster: ${status}`)
+            this._io.emit('device:status', { tricaster: status })
+        })
 
         // 订阅 engine runtime 变化，推送给所有前端客户端
         rundownEngine.on('runtimeChanged', (runtime) => {

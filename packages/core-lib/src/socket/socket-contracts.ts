@@ -38,6 +38,7 @@ export interface ServerToClientEvents {
     'rundown:standby':   (payload: { id: string }) => void;
     'runtime:state': (payload: RundownRuntime) => void;
     'rundown:lifecycle': (payload: { id: string; lifecycle: LifecycleStatus }) => void;
+    'device:status': (payload: { tricaster: DeviceConnectionStatus }) => void;
     'runtime:overrides': (payload: {
     overrides: Array<{ partId: string; sourceId: string; ddrFile?: string; createdAt: number }>
     }) => void;
@@ -81,3 +82,6 @@ export interface RundownRuntime {
     previewPartId: string | null
     nextPartId:    string | null
 }
+
+// ─── 设备连接状态（与 tricaster-client.ts 保持一致，core-lib 本地声明） ──────
+export type DeviceConnectionStatus = 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'

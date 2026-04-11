@@ -48,6 +48,7 @@ export default function App() {
     const {
         connected, summaries, activeRundown, runtime,
         activate, take, setNext, run, _initSocket,
+        tricasterStatus,
     } = useRCASStore()
 
     const [isRunning, setIsRunning] = useState(false)
@@ -116,6 +117,7 @@ export default function App() {
                 }}
                 isRunning={isRunning}
                 hasRundown={hasRundown}
+                tricasterStatus={tricasterStatus}
             />
 
             {/* ── Rundown 选择面板 ── */}
@@ -329,6 +331,7 @@ export default function App() {
                 ::-webkit-scrollbar-track { background: #111; }
                 ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
                 body { overflow: hidden; }
+                @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
             `}</style>
         </div>
     )
@@ -336,7 +339,7 @@ export default function App() {
 
 // ─── 顶栏 ─────────────────────────────────────────────────────────────────────
 
-function Header({ connected, rundownName, engineState, clock, onOpenRundown, onRun, isRunning, hasRundown }: {
+function Header({ connected, rundownName, engineState, clock, onOpenRundown, onRun, isRunning, hasRundown, tricasterStatus }: {
     connected:     boolean
     rundownName:   string | null
     engineState:   string
@@ -345,6 +348,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
     onRun:         () => void
     isRunning:     boolean
     hasRundown:    boolean
+    tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
 }) {
     const engineColor =
         engineState === 'RUNNING'    ? COLOR.pgm  :
@@ -389,6 +393,23 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                 <span style={{ color: COLOR.textDim, fontSize: 11 }}>
                     {connected ? 'CONNECTED' : 'OFFLINE'}
                 </span>
+            </div>
+
+            {/* Tricaster 连接状态 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: tricasterStatus === 'CONNECTED' ? COLOR.pvw
+                            : tricasterStatus === 'CONNECTING' ? COLOR.next
+                            : COLOR.pgm,
+                    boxShadow: tricasterStatus === 'CONNECTED' ? `0 0 6px ${COLOR.pvw}`
+                            : tricasterStatus === 'CONNECTING' ? `0 0 6px ${COLOR.next}`
+                            : `0 0 6px ${COLOR.pgm}`,
+                    animation: tricasterStatus === 'CONNECTING' ? 'pulse 1s infinite' : 'none',
+                }}/>
+                <span style={{ color: COLOR.textDim, fontSize: 11 }}>TC</span>
             </div>
 
             {/* 分隔 */}

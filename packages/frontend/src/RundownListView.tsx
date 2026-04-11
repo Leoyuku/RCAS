@@ -464,7 +464,7 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
 
 function ColumnHeader() {
     const col = (label: string, align: 'left' | 'right' | 'center' = 'center') => (
-        <div style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: C.textDim, textTransform: 'uppercase', textAlign: align }}>
+        <div style={{ fontFamily: C.mono, fontSize: 16, fontWeight: 700, letterSpacing: '0.12em', color: C.textDim, textTransform: 'uppercase', textAlign: align }}>
             {label}
         </div>
     )
@@ -590,7 +590,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     position: 'relative', zIndex: 1,
                 }}>
-                    <div style={{ fontFamily: C.mono, fontSize: 18, color: textColor, textAlign: 'center' }}>
+                    <div style={{ fontFamily: C.mono, fontSize: 20, color: textColor, textAlign: 'center' }}>
                         {pgLabel}
                     </div>
                 </div>
@@ -722,7 +722,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 type={part.type}
                                                 isOnAir={isPartOnAir}
                                                 isPreview={isPartPreview}
-                                                proxyUrl={mainPiece?.content?.proxyPath ?? null}
+                                                proxyUrl={mainPiece?.content?.thumbnailPath ?? null}
                                                 frameUrl={null} // 待 /api/preview/frame 实现后接入
                                                 airStatus={mainPiece?.content?.airStatus ?? null}
                                                 isOverride={isOverride}
