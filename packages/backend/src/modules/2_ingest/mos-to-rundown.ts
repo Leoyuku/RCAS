@@ -125,14 +125,18 @@ export function mosRunningOrderToRundown(ro: IMOSRunningOrder): IRundown {
 function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): ISegment {
     const externalId = mosTypes.mosString128.stringify(story.ID)
     const storySlug  = story.Slug ? mosTypes.mosString128.stringify(story.Slug) : null
-    const parts      = story.Items.map((item, idx) => itemToPart(item, externalId, idx, storySlug))
+    const storyNum   = story.Number ? mosTypes.mosString128.stringify(story.Number) : null
+    const parts      = story.Items
+        .map((item, idx) => itemToPart(item, externalId, idx, storySlug))
+        .filter(part => part.type !== PartType.UNKNOWN)
 
     return {
         _id:        externalId as any,
         externalId,
         rundownId,
         rank,
-        name:       story.Slug ? mosTypes.mosString128.stringify(story.Slug) : externalId,
+        name:       storySlug ?? externalId,
+        storyNum,
         parts,
     }
 }
@@ -140,7 +144,8 @@ function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): IS
 // ─── Item → Part ─────────────────────────────────────────────────────────────
 
 function itemToPart(item: IMOSItem, segmentId: string, rank: number, storySlug: string | null): IPart {
-    const externalId = mosTypes.mosString128.stringify(item.ID)
+    const itemId     = mosTypes.mosString128.stringify(item.ID)
+    const externalId = `${segmentId}_${itemId}`   // ← 组合确保全局唯一
     const mosId      = item.MOSID ?? null
     const objId      = item.ObjectID ? mosTypes.mosString128.stringify(item.ObjectID) : null
 

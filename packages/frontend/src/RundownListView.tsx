@@ -264,7 +264,8 @@ interface StoryRow {
 }
 
 function buildStoryRows(rundown: IRundown): StoryRow[] {
-    const segments = rundown.segments ?? []
+    const allSegments = (rundown.segments ?? []) as ISegment[]
+    const segments = allSegments.filter(seg => (seg.parts ?? []).length > 0)
     const rows: StoryRow[] = []
     const allParts = segments.flatMap(seg => seg.parts ?? [])
     const totalDuration = allParts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
@@ -277,7 +278,7 @@ function buildStoryRows(rundown: IRundown): StoryRow[] {
         rows.push({
             segment: seg,
             parts,
-            pgLabel: String(i + 1).padStart(2, '0'),
+            pgLabel: seg.storyNum ?? String(i + 1).padStart(2, '0'),
             totalDurMs: storyDur,
             backTimeMs: totalDuration - accumulated,
         })

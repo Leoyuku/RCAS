@@ -26,6 +26,12 @@ export interface ISegment {
      */
     rank: number;
 
+    /**
+     * 页码/稿件编号（来自 MOS storyNum）
+     * 导播用于快速定位稿件，显示在行号区域
+     */
+    storyNum?: string | null;
+
     /** 
      * 是否在 UI 上折叠显示
      */
