@@ -130,6 +130,13 @@ export class SocketServer {
                 if (callback) callback(result)
             })
 
+            // intent: STOP
+            socket.on('intent:stop', (callback) => {
+                logger.info(`[SocketServer] intent:stop from ${clientID}`)
+                const result = rundownEngine.intentStop()
+                if (callback) callback(result)
+            })
+
             // intent: SEND TO PREVIEW
             socket.on('intent:sendToPreview', (callback) => {
                 logger.info(`[SocketServer] intent:sendToPreview from ${clientID}`);

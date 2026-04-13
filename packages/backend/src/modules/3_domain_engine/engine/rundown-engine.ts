@@ -170,6 +170,21 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         return { ok: true }
     }
 
+    intentStop(): { ok: boolean; error?: string } {
+        if (!this._runtime) {
+            return { ok: false, error: 'No active rundown' }
+        }
+        this._setRuntime({
+            ...this._runtime,
+            engineState:   'STOPPED',
+            onAirPartId:   null,
+            previewPartId: null,
+            nextPartId:    null,
+        })
+        logger.info(`[RundownEngine] STOP → engine stopped, pointers cleared`)
+        return { ok: true }
+    }
+
     /**
      * SET NEXT：手动指定下一个要播的 Part
      */

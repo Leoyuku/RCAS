@@ -20,6 +20,7 @@ import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 import { PartType } from '../../core-lib/src/models/enums'
 import { useRCASStore } from './store/useRCASStore'
 import ReactDOM from 'react-dom'
+import { TOOLBAR_HEIGHT } from '../../core-lib/src/ui/ui-constants'
 
 // ─── 颜色系统 ─────────────────────────────────────────────────────────────────
 
@@ -248,11 +249,6 @@ function fmtMs(ms: number): string {
     return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function fmtTimeOfDay(ms: number): string {
-    const d = new Date(ms)
-    return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
-}
-
 // ─── Story 行数据结构 ─────────────────────────────────────────────────────────
 
 interface StoryRow {
@@ -305,11 +301,12 @@ export interface RundownListProps {
     runtime: RundownRuntime | null
     disabled: boolean
     onSetNext: (partId: string) => void
+    onStatsChange?: (stats: { totalMs: number; playedMs: number; remainMs: number; expectedEnd: number }) => void
 }
 
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 
-export default function RundownListView({ rundown, runtime, disabled, onSetNext }: RundownListProps) {
+export default function RundownListView({ rundown, runtime, disabled, onSetNext, onStatsChange }: RundownListProps) {
     injectAnimations()
     const rows = useMemo(() => buildStoryRows(rundown), [rundown])
 
@@ -385,6 +382,11 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
         const remainMs = totalMs - playedMs
         return { totalMs, playedMs, remainMs, expectedEnd: Date.now() + remainMs }
     }, [rows, runtime?.onAirPartId])
+    
+    // stats 变化时通知父组件
+    useEffect(() => {
+        onStatsChange?.(stats)
+    }, [stats])
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: C.bgBase }}>
@@ -455,7 +457,6 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
                 })}
                 <div style={{ height: containerHeight }} />
             </div>
-            <TotalBar stats={stats} />
         </div>
     )
 }
@@ -464,12 +465,12 @@ export default function RundownListView({ rundown, runtime, disabled, onSetNext 
 
 function ColumnHeader() {
     const col = (label: string, align: 'left' | 'right' | 'center' = 'center') => (
-        <div style={{ fontFamily: C.mono, fontSize: 16, fontWeight: 700, letterSpacing: '0.12em', color: C.textDim, textTransform: 'uppercase', textAlign: align }}>
+        <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: C.textDim, textTransform: 'uppercase', textAlign: align }}>
             {label}
         </div>
     )
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: '80px 160px 1fr 56px 64px', padding: '0 8px', height: 26, alignItems: 'center', background: C.bgSurface, borderBottom: `1px solid ${C.borderStrong}`, flexShrink: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 160px 1fr 72px 80px', padding: '0 8px', height: TOOLBAR_HEIGHT, alignItems: 'center', background: '#105752', borderBottom: `1px solid ${C.borderStrong}`, flexShrink: 0 }}>
             {col('PG', 'center')}
             {col('SLUG', 'center')}
             {col('', 'left')}
@@ -553,9 +554,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                 ? 'rgb(0,155,60)'    // 纯绿
                 : isPlayed
                     ? '#999999'          // 已播：更暗的灰，明显区别
-                    : hovered
-                        ? '#484848'          // hover
-                        : '#a6a6a6'          // 未播：标准灰
+                    : '#a6a6a6'          // 未播：标准灰
 
         // ── 遮罩：所有行统一，只做顶部高光 + 底部变暗 ──────────────────────
         const overlayGradient =
@@ -566,7 +565,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                 ref={ref}
                 style={{
                     display: 'grid',
-                    gridTemplateColumns: '80px 160px 1fr 56px 64px',
+                    gridTemplateColumns: '80px 160px 1fr 72px 80px',
                     padding: '0 8px',
                     alignItems: 'center',
                     background: rowBg,
@@ -819,7 +818,10 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     borderRadius: 3,
                     background: overlayGradient,
                     pointerEvents: 'none',
-                    zIndex: 2,
+                    zIndex: 4,
+                    boxShadow: hovered && !isOnAir && !isPreview
+                        ? 'inset 0 0 0 3px rgba(255,255,255,1)'
+                        : 'none',
                 }} />
             </div>
         )
@@ -842,30 +844,4 @@ function EmptyState() {
 
 // ─── 底部汇总栏 ───────────────────────────────────────────────────────────────
 
-interface TotalBarStats {
-    totalMs: number; playedMs: number; remainMs: number; expectedEnd: number
-}
 
-function TotalBar({ stats }: { stats: TotalBarStats }) {
-    const items = [
-        { lbl: 'TOTAL', val: fmtMs(stats.totalMs), color: C.textSec },
-        { lbl: 'PLAYED', val: fmtMs(stats.playedMs), color: C.textSec },
-        { lbl: 'REM', val: fmtMs(stats.remainMs), color: stats.remainMs > 0 && stats.remainMs < 120_000 ? '#e74c3c' : C.pvwLabel },
-        { lbl: 'ETA', val: stats.remainMs > 0 ? fmtTimeOfDay(stats.expectedEnd) : '—', color: C.textSec },
-    ]
-    return (
-        <div style={{
-            height: 26, borderTop: `1px solid ${C.borderStrong}`,
-            display: 'flex', alignItems: 'center', padding: '0 10px',
-            background: C.bgSurface, flexShrink: 0, gap: 0,
-        }}>
-            {items.map((item, i) => (
-                <div key={item.lbl} style={{ display: 'flex', alignItems: 'center' }}>
-                    {i > 0 && <div style={{ width: 1, height: 12, background: C.borderMid, margin: '0 10px' }} />}
-                    <span style={{ fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em', color: C.textDim, textTransform: 'uppercase', marginRight: 5 }}>{item.lbl}</span>
-                    <span style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 500, color: item.color }}>{item.val}</span>
-                </div>
-            ))}
-        </div>
-    )
-}

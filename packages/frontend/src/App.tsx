@@ -11,10 +11,16 @@
  *     mockRundown.ts 文件保留，可供独立测试使用。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
 import { useTricasterFrame } from './hooks/useTricasterFrame'
+import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+import type { IRundown } from '../../core-lib/src/models/rundown-model'
+import type { ISegment } from '../../core-lib/src/models/segment-model'
+import type { IPart } from '../../core-lib/src/models/part-model'
+import { PartType } from '../../core-lib/src/models/enums'
+import { TOOLBAR_HEIGHT } from '../../core-lib/src/ui/ui-constants'
 
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
@@ -42,19 +48,27 @@ function useClock() {
     return time.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+function fmtMs(ms: number): string {
+    if (!ms || ms <= 0) return '—'
+    const totalSec = Math.floor(ms / 1000)
+    const m = Math.floor(totalSec / 60)
+    const s = totalSec % 60
+    return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 
 export default function App() {
     const {
         connected, summaries, activeRundown, runtime,
-        activate, take, setNext, run, _initSocket,
+        activate, take, setNext, run, stop, _initSocket,
         tricasterStatus,
     } = useRCASStore()
 
     const [isRunning, setIsRunning] = useState(false)
-    const clock = useClock()
     const [showRundownPanel, setShowRundownPanel] = useState(false)
     const [selectedId, setSelectedId]             = useState<string | null>(null)
+    const [stats, setStats] = useState({ totalMs: 0, playedMs: 0, remainMs: 0, expectedEnd: 0 })
 
     useEffect(() => {
         _initSocket()
@@ -105,13 +119,13 @@ export default function App() {
                 connected={connected}
                 rundownName={activeSum?.name ?? activeRundown?.name ?? null}
                 engineState={engineState}
-                clock={clock}
                 onOpenRundown={() => setShowRundownPanel(true)}
                 onRun={() => {
                     if (!isRunning) {
                         run()
                         setIsRunning(true)
                     } else {
+                        stop()
                         setIsRunning(false)
                     }
                 }}
@@ -277,49 +291,57 @@ export default function App() {
             {/* ── 主体两栏 ── */}
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-                {/* 左栏：Rundown 列表 60% */}
-                <div style={{
-                    width:         '60%',
-                    display:       'flex',
-                    flexDirection: 'column',
-                    borderRight:   `1px solid ${COLOR.border}`,
-                    overflow:      'hidden',
-                }}>
-                    {hasRundown ? (
-                        <RundownListView
-                            rundown={activeRundown!}
-                            runtime={runtime}
-                            onSetNext={connected ? setNext : () => {}}
-                            disabled={!connected}
-                        />
-                    ) : (
-                        <div style={{
-                            flex:           1,
-                            display:        'flex',
-                            alignItems:     'center',
-                            justifyContent: 'center',
-                            flexDirection:  'column',
-                            gap:            12,
-                            color:          COLOR.textDim,
-                            fontFamily:     '"JetBrains Mono", monospace',
-                            fontSize:       11,
-                            letterSpacing:  '0.12em',
-                        }}>
-                            <div>NO ACTIVE RUNDOWN</div>
-                            <div style={{ fontSize: 10, opacity: 0.5 }}>点击顶栏 RUNDOWN 选择节目单</div>
-                        </div>
-                    )}
-                </div>
+            {/* 左栏 60% */}
+            <div style={{
+                width:         '60%',
+                display:       'flex',
+                flexDirection: 'column',
+                borderRight:   `1px solid ${COLOR.border}`,
+                overflow:      'hidden',
+            }}>
+                {/* ── 信息区 216px ── */}
+                <InfoPanel
+                    runtime={runtime}
+                    activeRundown={activeRundown}
+                    stats={stats}
+                />
+                {/* ── Rundown 列表 ── */}
+                {hasRundown ? (
+                    <RundownListView
+                        rundown={activeRundown!}
+                        runtime={runtime}
+                        onSetNext={connected ? setNext : () => {}}
+                        disabled={!connected}
+                        onStatsChange={setStats}
+                    />
+                ) : (
+                    <div style={{
+                        flex:           1,
+                        display:        'flex',
+                        alignItems:     'center',
+                        justifyContent: 'center',
+                        flexDirection:  'column',
+                        gap:            12,
+                        color:          COLOR.textDim,
+                        fontFamily:     '"JetBrains Mono", monospace',
+                        fontSize:       11,
+                        letterSpacing:  '0.12em',
+                    }}>
+                        <div>NO ACTIVE RUNDOWN</div>
+                        <div style={{ fontSize: 10, opacity: 0.5 }}>点击顶栏 RUNDOWN 选择节目单</div>
+                    </div>
+                )}
+            </div>
 
-                {/* 右栏：操作区 40% */}
-                <div style={{
-                    width:         '40%',
-                    display:       'flex',
-                    flexDirection: 'column',
-                    overflow:      'hidden',
-                }}>
-                    <RightPanel />
-                </div>
+            {/* 右栏 40% */}
+            <div style={{
+                width:         '40%',
+                display:       'flex',
+                flexDirection: 'column',
+                overflow:      'hidden',
+            }}>
+                <RightPanel />
+            </div>
 
             </div>
 
@@ -337,13 +359,265 @@ export default function App() {
     )
 }
 
+// ─── InfoPanel ────────────────────────────────────────────────────────────────
+
+function InfoPanel({ runtime, activeRundown, stats }: {
+    runtime: RundownRuntime | null
+    activeRundown: IRundown | null
+    stats: { totalMs: number; playedMs: number; remainMs: number; expectedEnd: number }
+}) {
+    const clock = useClock()
+    const [leftPct, setLeftPct] = useState(50)
+    const containerRef = useRef<HTMLDivElement>(null)
+
+    // ── Countdown 计时器 ──────────────────────────────────────────────────────
+    const [elapsedMs, setElapsedMs] = useState(0)
+    const startTimeRef = useRef<number | null>(null)
+    const prevOnAirPartId = useRef<string | null>(null)
+
+    useEffect(() => {
+        // onAirPartId 变化时重置计时
+        if (runtime?.onAirPartId !== prevOnAirPartId.current) {
+            prevOnAirPartId.current = runtime?.onAirPartId ?? null
+            startTimeRef.current = runtime?.onAirPartId ? Date.now() : null
+            setElapsedMs(0)
+        }
+    }, [runtime?.onAirPartId])
+
+    useEffect(() => {
+        if (!startTimeRef.current) return
+        const interval = setInterval(() => {
+            setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()))
+        }, 500)
+        return () => clearInterval(interval)
+    }, [runtime?.onAirPartId])
+
+    const onDividerMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault()
+        const container = containerRef.current
+        if (!container) return
+        const rect = container.getBoundingClientRect()
+        const onMove = (ev: MouseEvent) => {
+            const pct = ((ev.clientX - rect.left) / rect.width) * 100
+            setLeftPct(Math.min(80, Math.max(20, pct)))
+        }
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }
+
+    // 当前 ON AIR 故事和 Part
+    const onAirSegment = activeRundown?.segments?.find((seg: ISegment) =>
+        seg.parts?.some((p: IPart) => (p._id as string) === runtime?.onAirPartId)
+    ) ?? null
+
+    const onAirPart = onAirSegment?.parts?.find(
+        (p: IPart) => (p._id as string) === runtime?.onAirPartId
+    ) ?? null
+
+    const isVideo = onAirPart?.type === PartType.SERVER || onAirPart?.type === PartType.VO
+    const expectedMs = onAirSegment?.parts?.reduce(
+        (a: number, p: IPart) => a + (p.expectedDuration ?? 0), 0
+    ) ?? 0
+    const countdownMs = Math.max(0, expectedMs - elapsedMs)
+    const currentDiffMs = elapsedMs - expectedMs  // 正数=超时，负数=提前
+    // 累计偏差：已播时长 - 理论应播时长（暂用 playedMs 近似）
+    const accumDiffMs = stats.playedMs - (stats.totalMs - stats.remainMs)
+
+    const fmtDiff = (ms: number) => {
+        const abs = Math.abs(ms)
+        const sign = ms >= 0 ? '+' : '-'
+        return `${sign}${fmtMs(abs)}`
+    }
+
+    return (
+        <div
+            ref={containerRef}
+            style={{
+                height:       'calc(20vw * 9 / 16)',
+                flexShrink:   0,
+                display:      'flex',
+                borderBottom: `1px solid ${COLOR.border}`,
+                position:     'relative',
+                background:   COLOR.bgPanel,
+            }}
+        >
+            {/* ── 左半：字幕区 ── */}
+            <div style={{
+                width:         `${leftPct}%`,
+                display:       'flex',
+                flexDirection: 'column',
+                borderRight:   `1px solid ${COLOR.border}`,
+                overflow:      'hidden',
+            }}>
+                <div style={{
+                    height:        22,
+                    flexShrink:    0,
+                    borderBottom:  `1px solid ${COLOR.border}`,
+                    display:       'flex',
+                    alignItems:    'center',
+                    padding:       '0 10px',
+                    fontFamily:    '"JetBrains Mono", monospace',
+                    fontSize:      9,
+                    fontWeight:    700,
+                    letterSpacing: '0.12em',
+                    color:         COLOR.textDim,
+                }}>
+                    SUBTITLE / CG
+                </div>
+                <div style={{
+                    flex:           1,
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    color:          COLOR.textDim,
+                    fontFamily:     '"JetBrains Mono", monospace',
+                    fontSize:       10,
+                    opacity:        0.4,
+                }}>
+                    — 待实现 —
+                </div>
+            </div>
+
+            {/* ── 拖动分割线 ── */}
+            <div
+                onMouseDown={onDividerMouseDown}
+                style={{
+                    width:      6,
+                    flexShrink: 0,
+                    cursor:     'col-resize',
+                    background: 'transparent',
+                    position:   'relative',
+                    zIndex:     10,
+                }}
+            >
+                <div style={{
+                    position:   'absolute',
+                    top:        0,
+                    bottom:     0,
+                    left:       2,
+                    width:      2,
+                    background: COLOR.border,
+                }}/>
+            </div>
+
+            {/* ── 右半：时间信息区 ── */}
+            <div style={{
+                flex:          1,
+                display:       'flex',
+                flexDirection: 'column',
+                overflow:      'hidden',
+                minWidth:      0,
+            }}>
+                {/* 标题栏 */}
+                <div style={{
+                    height:        22,
+                    flexShrink:    0,
+                    borderBottom:  `1px solid ${COLOR.border}`,
+                    display:       'flex',
+                    alignItems:    'center',
+                    padding:       '0 10px',
+                    fontFamily:    '"JetBrains Mono", monospace',
+                    fontSize:      9,
+                    fontWeight:    700,
+                    letterSpacing: '0.12em',
+                    color:         COLOR.textDim,
+                }}>
+                    <span>TIMING</span>
+                    <span style={{ marginLeft: 'auto', color: COLOR.text, fontSize: 11 }}>{clock}</span>
+                </div>
+
+                {/* 内容区 */}
+                <div style={{
+                    flex:    1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '8px 12px',
+                    gap:     8,
+                    justifyContent: 'space-between',
+                }}>
+                    {/* 上：参考信息（预计 + 实际） */}
+                    <div style={{ display: 'flex', gap: 12 }}>
+                        <TimingBox label="预计时长" value={expectedMs > 0 ? fmtMs(expectedMs) : '—'} />
+                        <TimingBox label="实际时长" value={elapsedMs > 0 ? fmtMs(elapsedMs) : '—'} />
+                    </div>
+
+                    {/* 下：核心信息（偏差 + Countdown） */}
+                    <div style={{ display: 'flex', gap: 12 }}>
+                        <TimingBox
+                            label="当前偏差"
+                            value={elapsedMs > 0 ? fmtDiff(currentDiffMs) : '—'}
+                            color={currentDiffMs > 0 ? '#ff4444' : currentDiffMs < 0 ? '#00ff88' : '#ffffff'}
+                        />
+                        <TimingBox
+                            label="累计偏差"
+                            value={stats.playedMs > 0 ? fmtDiff(accumDiffMs) : '—'}
+                            color={accumDiffMs > 0 ? '#ff4444' : accumDiffMs < 0 ? '#00ff88' : '#ffffff'}
+                        />
+                        <TimingBox
+                            label="COUNTDOWN"
+                            value={isVideo && elapsedMs > 0 ? fmtMs(countdownMs) : '—'}
+                            color={countdownMs < 10_000 && isVideo ? '#ff4444' : '#ffffff'}
+                            flex={2}  // countdown 框更宽
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// ─── 时间显示框 ───────────────────────────────────────────────────────────────
+
+function TimingBox({ label, value, color, flex: flexVal }: {
+    label:   string
+    value:   string
+    color?:  string
+    flex?:   number
+}) {
+    return (
+        <div style={{
+            flex:          flexVal ?? 1,
+            background:    '#141920',
+            border:        `1px solid #2a3444`,
+            borderRadius:  4,
+            padding:       '6px 10px',
+            display:       'flex',
+            flexDirection: 'column',
+            gap:           6,
+        }}>
+            <div style={{
+                fontFamily:    '"JetBrains Mono", monospace',
+                fontSize:      10,
+                fontWeight:    700,
+                letterSpacing: '0.12em',
+                color:         '#f5f5f5',
+                textTransform: 'uppercase',
+            }}>
+                {label}
+            </div>
+            <div style={{
+                fontFamily:    '"JetBrains Mono", monospace',
+                fontSize:      24,               // ← 从18增大到24
+                fontWeight:    700,              // ← 从600加粗到700
+                color:         color ?? '#ffffff',
+                letterSpacing: '0.04em',
+            }}>
+                {value}
+            </div>
+        </div>
+    )
+}
+
 // ─── 顶栏 ─────────────────────────────────────────────────────────────────────
 
-function Header({ connected, rundownName, engineState, clock, onOpenRundown, onRun, isRunning, hasRundown, tricasterStatus }: {
+function Header({ connected, rundownName, engineState, onOpenRundown, onRun, isRunning, hasRundown, tricasterStatus }: {
     connected:     boolean
     rundownName:   string | null
     engineState:   string
-    clock:         string
     onOpenRundown: () => void
     onRun:         () => void
     isRunning:     boolean
@@ -360,9 +634,9 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
 
     return (
         <div style={{
-            height:       48,
-            minHeight:    48,
-            background:   '#0A0A0A',
+            height:       TOOLBAR_HEIGHT,
+            minHeight:    TOOLBAR_HEIGHT,
+            background:   '#105752',
             borderBottom: `1px solid ${COLOR.border}`,
             display:      'flex',
             alignItems:   'center',
@@ -372,7 +646,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
             {/* Logo */}
             <div style={{
                 fontFamily:    '"JetBrains Mono", monospace',
-                fontSize:      15,
+                fontSize:      14,
                 fontWeight:    600,
                 letterSpacing: '0.2em',
                 color:         '#FFF',
@@ -390,7 +664,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                     background:   connected ? COLOR.pvw : COLOR.pgm,
                     boxShadow:    connected ? `0 0 6px ${COLOR.pvw}` : `0 0 6px ${COLOR.pgm}`,
                 }}/>
-                <span style={{ color: COLOR.textDim, fontSize: 11 }}>
+                <span style={{ color: '#FFF', fontSize: 14 }}>
                     {connected ? 'CONNECTED' : 'OFFLINE'}
                 </span>
             </div>
@@ -409,7 +683,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                             : `0 0 6px ${COLOR.pgm}`,
                     animation: tricasterStatus === 'CONNECTING' ? 'pulse 1s infinite' : 'none',
                 }}/>
-                <span style={{ color: COLOR.textDim, fontSize: 11 }}>TC</span>
+                <span style={{ color: '#FFF', fontSize: 14 }}>TC</span>
             </div>
 
             {/* 分隔 */}
@@ -418,7 +692,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
             {/* Rundown 名称 */}
             <div style={{
                 flex:         1,
-                fontSize:     13,
+                fontSize:     14,
                 fontWeight:   600,
                 color:        rundownName ? COLOR.text : COLOR.textDim,
                 overflow:     'hidden',
@@ -434,11 +708,11 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                     onClick={onRun}
                     style={{
                         fontFamily:    '"JetBrains Mono", monospace',
-                        fontSize:      10,
+                        fontSize:      12,
                         fontWeight:    700,
                         letterSpacing: '0.1em',
-                        color:         isRunning ? COLOR.pgm : COLOR.pvw,
-                        background:    isRunning ? COLOR.pgm + '22' : COLOR.pvw + '22',
+                        color:         isRunning ? '#FFFFFF' : COLOR.text,
+                        background:    isRunning ? COLOR.pgm : 'transparent',
                         border:        `1px solid ${isRunning ? COLOR.pgm : COLOR.pvw}`,
                         padding:       '3px 10px',
                         borderRadius:  2,
@@ -454,7 +728,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                 onClick={onOpenRundown}
                 style={{
                     fontFamily:    '"JetBrains Mono", monospace',
-                    fontSize:      10,
+                    fontSize:      12,
                     fontWeight:    700,
                     letterSpacing: '0.1em',
                     color:         COLOR.text,
@@ -471,7 +745,7 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
             {/* ENGINE 状态 */}
             <div style={{
                 fontFamily:    '"JetBrains Mono", monospace',
-                fontSize:      10,
+                fontSize:      12,
                 fontWeight:    700,
                 letterSpacing: '0.1em',
                 color:         engineColor,
@@ -481,19 +755,6 @@ function Header({ connected, rundownName, engineState, clock, onOpenRundown, onR
                 borderRadius:  2,
             }}>
                 ENGINE {engineState}
-            </div>
-
-            {/* 时钟 */}
-            <div style={{
-                fontFamily:    '"JetBrains Mono", monospace',
-                fontSize:      20,
-                fontWeight:    300,
-                color:         COLOR.text,
-                letterSpacing: '0.04em',
-                minWidth:      90,
-                textAlign:     'right',
-            }}>
-                {clock}
             </div>
         </div>
     )
@@ -642,9 +903,8 @@ function RightPanel() {
             <div style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr 1fr',
-                gap: 1,
+                gap: 0,
                 background: COLOR.border,
-                borderBottom: `1px solid ${COLOR.border}`,
                 flexShrink: 0,
             }}>
                 <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
@@ -660,10 +920,11 @@ function RightPanel() {
             }}>
                 {/* Tab 标签栏 */}
                 <div style={{
+                    height: TOOLBAR_HEIGHT,
                     display: 'flex',
-                    borderBottom: `1px solid ${COLOR.border}`,
                     flexShrink: 0,
-                    background: '#0A0A0A',
+                    background: '#0D0D0D',
+                    paddingLeft: 0,
                 }}>
                     {availableTypes.length === 0 ? (
                         <div style={{
@@ -679,20 +940,21 @@ function RightPanel() {
                             key={type}
                             onClick={() => setActiveTab(type)}
                             style={{
-                                padding: '7px 16px',
-                                fontSize: 11,
-                                fontWeight: activeTab === type ? 700 : 400,
-                                color: activeTab === type ? COLOR.text : COLOR.textDim,
-                                background: activeTab === type ? '#2A2A2A' : '#0A0A0A',  // ← 激活背景更亮
-                                borderTop: activeTab === type ? `2px solid ${COLOR.pvw}` : '2px solid transparent',
-                                borderRight: `1px solid ${activeTab === type ? COLOR.border : 'transparent'}`,
-                                borderLeft: `1px solid ${activeTab === type ? COLOR.border : 'transparent'}`,
-                                borderBottom: activeTab === type ? '1px solid #2A2A2A' : 'none',
-                                marginBottom: activeTab === type ? '-1px' : '0',
+                                height: '100%',
+                                padding: '0 16px',
+                                display: 'flex',
+                                alignItems: 'center',
                                 cursor: 'pointer',
                                 fontFamily: '"JetBrains Mono", monospace',
+                                fontSize: 12,
                                 letterSpacing: '0.06em',
                                 userSelect: 'none',
+                                borderRadius: 0,
+                                border: 'none',          // ← 完全去掉边框
+                                marginBottom: 0,
+                                fontWeight: activeTab === type ? 700 : 400,
+                                color: activeTab === type ? '#FFFFFF' : COLOR.textDim,
+                                background: activeTab === type ? '#3a4a5c' : 'transparent',
                             }}
                         >
                             {TAB_LABELS[type] ?? type.toUpperCase()}
@@ -709,6 +971,9 @@ function RightPanel() {
                     flexWrap: 'wrap',
                     alignContent: 'flex-start',
                     gap: 6,
+                    border: 'none',
+                    margin: 0,
+                    background: '#3a4a5c',   // ← 和选中标签同色
                 }}>
                     {/* DDR Tab 单独处理 */}
                     {['ddr1','ddr2','ddr3','ddr4'].includes(activeTab) ? (
