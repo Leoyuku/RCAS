@@ -107,15 +107,15 @@ export function mosRunningOrderToRundown(ro: IMOSRunningOrder): IRundown {
     const segments   = ro.Stories.map((story, idx) => storyToSegment(story, externalId, idx))
 
     return {
-        _id:              externalId as any,
+        _id:               externalId as any,
         externalId,
-        name:             mosTypes.mosString128.stringify(ro.Slug),
-        expectedStart:    ro.EditorialStart    ? Number(ro.EditorialStart)    : undefined,
-        expectedDuration: ro.EditorialDuration ? Number(ro.EditorialDuration) : undefined,
-        status:           PlaylistStatus.UNKNOWN,
-        currentPartId:    null,
-        nextPartId:       null,
-        modified:         Date.now(),
+        name:              mosTypes.mosString128.stringify(ro.Slug),
+        expectedStart: ro.EditorialStart ? ro.EditorialStart._mosTime : undefined,
+        editorialDuration: ro.EditorialDuration ? ro.EditorialDuration._mosDuration * 1000 : undefined,
+        status:            PlaylistStatus.UNKNOWN,
+        currentPartId:     null,
+        nextPartId:        null,
+        modified:          Date.now(),
         segments,
     }
 }
@@ -130,6 +130,28 @@ function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): IS
         .map((item, idx) => itemToPart(item, externalId, idx, storySlug))
         .filter(part => part.type !== PartType.UNKNOWN)
 
+    // ── 时长换算 ──────────────────────────────────────────────────────────────
+    // octext_storyTotalDur / octext_storyPlanDur 单位是帧数
+    // TimeBase 从第一个有 TimeBase 的 item 继承，兜底使用 59.94fps
+    // 优先用 Octopus story 级时长字段
+    const rawTotal = (story as any).octext_storyTotalDur
+    const rawPlan  = (story as any).octext_storyPlanDur
+    const inferredTimeBase = story.Items.find(i => i.TimeBase && i.TimeBase > 0)?.TimeBase ?? 59.94
+
+    const expectedDuration = (rawTotal && rawTotal > 0)
+    ? Math.round((rawTotal / inferredTimeBase) * 1000)
+    : (rawPlan && rawPlan > 0)
+        ? Math.round((rawPlan / inferredTimeBase) * 1000)
+        : story.Items.reduce((acc, item) => {
+            if (!item.EditorialDuration || item.EditorialDuration <= 0) return acc
+            const tb = (item.TimeBase && item.TimeBase > 0) ? item.TimeBase : inferredTimeBase
+            return acc + Math.round((item.EditorialDuration / tb) * 1000)
+        }, 0) || undefined
+
+    const planDuration = (rawPlan && rawPlan > 0)
+        ? Math.round((rawPlan / inferredTimeBase) * 1000)
+        : undefined
+
     return {
         _id:        externalId as any,
         externalId,
@@ -137,6 +159,8 @@ function storyToSegment(story: IMOSROStory, rundownId: string, rank: number): IS
         rank,
         name:       storySlug ?? externalId,
         storyNum,
+        expectedDuration,
+        planDuration,
         parts,
     }
 }

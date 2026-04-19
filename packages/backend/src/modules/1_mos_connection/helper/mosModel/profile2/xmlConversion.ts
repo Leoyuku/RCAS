@@ -189,6 +189,11 @@ export namespace XMLROStory {
 				}
 			}
 
+			// Octopus story 级扩展字段透传（与 item 级 octext_ 处理方式一致）
+			if (has(xml, 'octext_storyTotalDur')) (story as any).octext_storyTotalDur = Number(xml.octext_storyTotalDur)
+			if (has(xml, 'octext_storyPlanDur'))  (story as any).octext_storyPlanDur  = Number(xml.octext_storyPlanDur)
+			if (has(xml, 'octext_storyEdDur'))    (story as any).octext_storyEdDur    = Number(xml.octext_storyEdDur)
+
 			omitUndefined(story)
 			return story
 		} catch (e) {

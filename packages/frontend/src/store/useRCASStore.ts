@@ -37,6 +37,7 @@ interface RCASStore {
     runtime: RundownRuntime | null
     overrides: Record<string, PartOverride>
     tricasterHost: string | null
+    plannedDuration: number | null
     tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
     sources: Record<string, { id: string; label: string; type: string }>
 
@@ -67,6 +68,7 @@ export const useRCASStore = create<RCASStore>((set) => ({
     overrides: {},
     sources: {},
     tricasterHost: null,
+    plannedDuration: null,
     tricasterStatus: 'DISCONNECTED',
 
     _initSocket: () => {
@@ -91,7 +93,8 @@ export const useRCASStore = create<RCASStore>((set) => ({
                     const switcherId = cfg?.activeDevices?.switcher
                     const host = switcherId ? cfg?.devices?.[switcherId]?.connection?.host ?? null : null
                     if (host) console.log('[Store] tricasterHost:', host)
-                    set({ tricasterHost: host })
+                        const plannedDuration = cfg?.plannedDuration ?? null
+                        set({ tricasterHost: host, plannedDuration })
                 })
                 .catch(err => console.error('[Store] Failed to load device config:', err))
         })

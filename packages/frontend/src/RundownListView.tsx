@@ -270,7 +270,8 @@ function buildStoryRows(rundown: IRundown): StoryRow[] {
     for (let i = 0; i < segments.length; i++) {
         const seg = segments[i]
         const parts = seg.parts ?? []
-        const storyDur = parts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
+        const storyDur = seg.expectedDuration
+            ?? parts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
         rows.push({
             segment: seg,
             parts,
@@ -495,12 +496,13 @@ interface StoryRowItemProps {
 }
 
 const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
-    ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled }, ref) => {
+    ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled, rundown }, ref) => {
         const [hovered, setHovered] = useState(false)
         // ── 覆盖相关 ──────────────────────────────────────────────────────────────
         const partOverrides = useRCASStore(s => s.overrides)
         const setPartOverride  = useRCASStore(s => s.setPartOverride)
         const clearPartOverride = useRCASStore(s => s.clearPartOverride)
+        const plannedDuration = useRCASStore(s => s.plannedDuration)
 
         // 右键菜单状态
         const [ctxMenu, setCtxMenu] = useState<{
@@ -808,7 +810,18 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     height: 22, position: 'relative', zIndex: 1,
                 }}>
-                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>{fmtMs(backTimeMs)}</span>
+                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>
+                        {(() => {
+                            const { expectedStart } = rundown
+                            if (!expectedStart || !plannedDuration) return fmtMs(backTimeMs)
+                            const backClock = expectedStart + plannedDuration - backTimeMs
+                            const d = new Date(backClock)
+                            const HH = String(d.getHours()).padStart(2, '0')
+                            const mm = String(d.getMinutes()).padStart(2, '0')
+                            const ss = String(d.getSeconds()).padStart(2, '0')
+                            return `${HH}:${mm}:${ss}`
+                        })()}
+                    </span>
                 </div>
 
                 {/* ─── 顶层渐变遮罩：所有行统一，只做光照 ─── */}

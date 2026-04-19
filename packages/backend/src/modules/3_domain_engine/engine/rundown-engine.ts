@@ -114,12 +114,37 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         const newPreviewId = parts[takeIndex + 1]?._id ?? null;
         const newNextId    = parts[takeIndex + 2]?._id ?? null;
 
+        // ── 累计偏差计算 ──────────────────────────────────────────────────────────
+        // 如果之前有 onAir 故事，计算它的实际播出时长与预计时长的差值，累加到 accumFinishedDiffMs
+        const prevAccum = this._runtime.accumFinishedDiffMs ?? 0
+        let newAccum = prevAccum
+
+        if (this._runtime.onAirPartId && this._runtime.onAirAt) {
+            const actualMs = Date.now() - this._runtime.onAirAt
+
+            // 找到上一条 onAir Part 所属的 Segment，取 segment 级 expectedDuration
+            const rundown = rundownStore.getRundown(rundownId)
+            const prevSegment = rundown?.segments?.find(seg =>
+                seg.parts?.some(p => (p._id as string) === this._runtime!.onAirPartId)
+            )
+            // 优先用 segment.expectedDuration（来自 Octopus），兜底用该 segment 下所有 parts 求和
+            const expectedMs = prevSegment?.expectedDuration
+                ?? prevSegment?.parts?.reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+                ?? 0
+
+            if (expectedMs > 0) {
+                newAccum = prevAccum + (actualMs - expectedMs)
+            }
+        }
+
         this._setRuntime({
             ...this._runtime,
-            engineState:   'RUNNING',
-            onAirPartId:   takePartId,
-            previewPartId: newPreviewId,
-            nextPartId:    newNextId,
+            engineState:         'RUNNING',
+            onAirPartId:         takePartId,
+            previewPartId:       newPreviewId,
+            nextPartId:          newNextId,
+            onAirAt:             Date.now(),
+            accumFinishedDiffMs: newAccum,
         });
 
         // 同步更新 RundownStore 的 currentPartId / nextPartId
@@ -176,10 +201,12 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         }
         this._setRuntime({
             ...this._runtime,
-            engineState:   'STOPPED',
-            onAirPartId:   null,
-            previewPartId: null,
-            nextPartId:    null,
+            engineState:         'STOPPED',
+            onAirPartId:         null,
+            previewPartId:       null,
+            nextPartId:          null,
+            onAirAt:             undefined,
+            accumFinishedDiffMs: 0,
         })
         logger.info(`[RundownEngine] STOP → engine stopped, pointers cleared`)
         return { ok: true }

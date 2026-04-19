@@ -32,6 +32,19 @@ export interface ISegment {
      */
     storyNum?: string | null;
 
+    /**
+     * 故事预计总时长（毫秒）
+     * 来自 Octopus octext_storyTotalDur（帧数），由 mos-to-rundown.ts 换算
+     */
+    expectedDuration?: number;
+
+    /**
+     * 故事计划时长（毫秒）
+     * 来自 Octopus octext_storyPlanDur（帧数），节目表排定的时长
+     * 注意：很多故事此值为 0，表示无计划时长限制
+     */
+    planDuration?: number;
+
     /** 
      * 是否在 UI 上折叠显示
      */

@@ -82,6 +82,11 @@ export interface RundownRuntime {
     onAirPartId:   string | null
     previewPartId: string | null
     nextPartId:    string | null
+    // ── 时间统计（v21）──────────────────────────────────────
+    /** 当前故事 onAir 开始时间戳（ms），用于前端计算实际播出时长 */
+    onAirAt?: number
+    /** 已完成故事的偏差累计（ms），正数=累计超时，负数=累计提前 */
+    accumFinishedDiffMs?: number
 }
 
 // ─── 设备连接状态（与 tricaster-client.ts 保持一致，core-lib 本地声明） ──────

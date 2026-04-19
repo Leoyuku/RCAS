@@ -73,6 +73,10 @@ export interface IMOSStory {
 }
 export interface IMOSROStory extends IMOSStory {
 	Items: Array<IMOSItem>
+	// Octopus 扩展字段（story 级别）
+	octext_storyTotalDur?: number   // 故事总时长（帧数）
+	octext_storyPlanDur?: number    // 计划时长（帧数）
+	octext_storyEdDur?: number      // 编辑时长（帧数）
 }
 export interface IMOSROFullStory extends IMOSStory {
 	RunningOrderId: IMOSString128

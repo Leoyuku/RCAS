@@ -29,6 +29,13 @@ export interface IRundown {
     expectedDuration?: number;
 
     /**
+     * Octopus 实时推送的节目实际总时长 (Unix Timestamp, 毫秒)
+     * 来自 MOS roEdDur，由 roMetadataReplace 动态更新
+     * 与 plannedDuration 的差值 = rundown层面的理论偏差
+     */
+    editorialDuration?: number;
+
+    /**
      * 播放列表状态 (Active / Rehearsal / Inactive)
      * 只有 Active 状态下，Playout Gateway 才会真正输出控制信号。
      */

@@ -1,4 +1,5 @@
 {
+    "plannedDuration": 1800000,
     "activeDevices": {
         "switcher": "tricaster-1",
         "videoServer": null,

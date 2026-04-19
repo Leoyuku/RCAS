@@ -88,6 +88,10 @@ export class MosCache extends EventEmitter<MosCacheEvents> {
 
     handleCreateRunningOrder(ro: IMOSRunningOrder): void {
         const roID = mosTypes.mosString128.stringify(ro.ID!);
+        // 临时调试
+        console.log('[DEBUG CACHE] S002 octext_storyTotalDur:', 
+            ro.Stories.find(s => mosTypes.mosString128.stringify(s.ID) === 'S002')?.octext_storyTotalDur
+        )
         if (this._rundowns.has(roID)) {
             logger.warn(`[MosCache] roCreate: "${roID}" already exists, overwriting.`);
         }

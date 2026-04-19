@@ -11,6 +11,8 @@
  */
 
 import { Router, Request, Response } from 'express'
+import { exec } from 'child_process'
+import os from 'os'
 import { deviceConfigService } from './device-config.service'
 import { playoutController } from '../playout-controller'
 import { tricasterDriver } from '../tricaster/tricaster-driver'
@@ -227,4 +229,29 @@ deviceConfigRouter.post('/ddr/load', async (req: Request, res: Response) => {
         logger.error(`[DDR] Failed to load clip: ${err.message}`)
         res.status(500).json({ error: err.message })
     }
+})
+
+// ── POST /api/time/sync ───────────────────────────────────────────────────────
+// 触发系统 NTP 时间同步
+deviceConfigRouter.post('/time/sync', (_req: Request, res: Response) => {
+    const platform = os.platform()
+    let command: string
+
+    if (platform === 'win32') {
+        command = 'w32tm /resync'
+    } else if (platform === 'darwin') {
+        command = 'sntp -sS time.apple.com'
+    } else {
+        // Linux（含开发环境）：系统通常已有 NTP 同步，直接返回成功
+        res.json({ ok: true, timestamp: Date.now() })
+        return
+    }
+
+    exec(command, (error) => {
+        if (error) {
+            res.json({ ok: false, error: error.message })
+        } else {
+            res.json({ ok: true, timestamp: Date.now() })
+        }
+    })
 })

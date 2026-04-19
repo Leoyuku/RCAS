@@ -40,12 +40,31 @@ const COLOR = {
 
 // 实时时钟 hook
 function useClock() {
+    const [syncing, setSyncing] = useState(false)
     const [time, setTime] = useState(() => new Date())
+
     useEffect(() => {
         const t = setInterval(() => setTime(new Date()), 500)
         return () => clearInterval(t)
     }, [])
-    return time.toLocaleTimeString('zh-CN', { hour12: false })
+
+    const sync = async () => {
+        setSyncing(true)
+        try {
+            const res = await fetch('/api/time/sync', { method: 'POST' })
+            await res.json()
+        } catch (e) {
+            // 静默失败
+        } finally {
+            setSyncing(false)
+        }
+    }
+
+    return {
+        display: time.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        syncing,
+        sync,
+    }
 }
 
 function fmtMs(ms: number): string {
@@ -366,31 +385,40 @@ function InfoPanel({ runtime, activeRundown, stats }: {
     activeRundown: IRundown | null
     stats: { totalMs: number; playedMs: number; remainMs: number; expectedEnd: number }
 }) {
-    const clock = useClock()
+    const { display: clock, syncing: clockSyncing, sync: syncClock } = useClock()
     const [leftPct, setLeftPct] = useState(50)
     const containerRef = useRef<HTMLDivElement>(null)
 
     // ── Countdown 计时器 ──────────────────────────────────────────────────────
     const [elapsedMs, setElapsedMs] = useState(0)
     const startTimeRef = useRef<number | null>(null)
-    const prevOnAirPartId = useRef<string | null>(null)
+    const prevOnAirSegmentId = useRef<string | null>(null)
+
+    // 当前 ON AIR 故事和 Part
+    const onAirSegment = activeRundown?.segments?.find((seg: ISegment) =>
+        seg.parts?.some((p: IPart) => (p._id as string) === runtime?.onAirPartId)
+    ) ?? null
+
+    const onAirSegmentId = onAirSegment ? (onAirSegment._id as string) : null
 
     useEffect(() => {
-        // onAirPartId 变化时重置计时
-        if (runtime?.onAirPartId !== prevOnAirPartId.current) {
-            prevOnAirPartId.current = runtime?.onAirPartId ?? null
-            startTimeRef.current = runtime?.onAirPartId ? Date.now() : null
+        if (onAirSegmentId !== prevOnAirSegmentId.current) {
+            prevOnAirSegmentId.current = onAirSegmentId
+            startTimeRef.current = runtime?.onAirAt ?? null
             setElapsedMs(0)
         }
-    }, [runtime?.onAirPartId])
+    }, [onAirSegmentId])
 
     useEffect(() => {
-        if (!startTimeRef.current) return
+        if (!startTimeRef.current || runtime?.engineState === 'STOPPED') {
+            setElapsedMs(0)
+            return
+        }
         const interval = setInterval(() => {
             setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()))
         }, 500)
         return () => clearInterval(interval)
-    }, [runtime?.onAirPartId])
+    }, [onAirSegmentId, runtime?.engineState])
 
     const onDividerMouseDown = (e: React.MouseEvent) => {
         e.preventDefault()
@@ -409,24 +437,31 @@ function InfoPanel({ runtime, activeRundown, stats }: {
         window.addEventListener('mouseup', onUp)
     }
 
-    // 当前 ON AIR 故事和 Part
-    const onAirSegment = activeRundown?.segments?.find((seg: ISegment) =>
-        seg.parts?.some((p: IPart) => (p._id as string) === runtime?.onAirPartId)
-    ) ?? null
-
     const onAirPart = onAirSegment?.parts?.find(
         (p: IPart) => (p._id as string) === runtime?.onAirPartId
     ) ?? null
 
     const isVideo = onAirPart?.type === PartType.SERVER || onAirPart?.type === PartType.VO
-    const expectedMs = onAirSegment?.parts?.reduce(
-        (a: number, p: IPart) => a + (p.expectedDuration ?? 0), 0
-    ) ?? 0
+    // 优先用 Octopus 提供的 story 级时长，兜底用 Parts 求和
+    const expectedMs = onAirSegment?.expectedDuration
+    ?? onAirSegment?.parts?.reduce((a: number, p: IPart) => a + (p.expectedDuration ?? 0), 0)
+    ?? 0
     const countdownMs = Math.max(0, expectedMs - elapsedMs)
-    const currentDiffMs = elapsedMs - expectedMs  // 正数=超时，负数=提前
     // 累计偏差：已播时长 - 理论应播时长（暂用 playedMs 近似）
-    const accumDiffMs = stats.playedMs - (stats.totalMs - stats.remainMs)
+    const plannedDuration = useRCASStore(s => s.plannedDuration)
+    const editorialDuration = activeRundown?.editorialDuration ?? null
 
+    // 整体偏差 = roEdDur偏差 + 当前故事实时偏差
+    // roEdDur偏差：Octopus实际总时长 - 节目计划时长
+    // 当前故事实时偏差：已播时长 - 预计时长
+    const roEdDurDiffMs = (editorialDuration !== null && plannedDuration !== null)
+        ? editorialDuration - plannedDuration
+        : null
+    const isKamOrVO = onAirPart?.type === PartType.KAM || onAirPart?.type === PartType.VO
+    const accumFinishedDiffMs = runtime?.accumFinishedDiffMs ?? 0
+    const accumDiffMs = roEdDurDiffMs !== null
+        ? roEdDurDiffMs + accumFinishedDiffMs + (isKamOrVO ? elapsedMs - expectedMs : 0)
+        : null
     const fmtDiff = (ms: number) => {
         const abs = Math.abs(ms)
         const sign = ms >= 0 ? '+' : '-'
@@ -527,7 +562,23 @@ function InfoPanel({ runtime, activeRundown, stats }: {
                     color:         COLOR.textDim,
                 }}>
                     <span>TIMING</span>
-                    <span style={{ marginLeft: 'auto', color: COLOR.text, fontSize: 11 }}>{clock}</span>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span
+                            onClick={syncClock}
+                            title="同步网络标准时间"
+                            style={{
+                                fontSize: 18,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                color: clockSyncing ? '#00ff88' : COLOR.textDim,
+                                letterSpacing: '0.08em',
+                                userSelect: 'none',
+                            }}
+                        >
+                            {'↻'}
+                        </span>
+                        <span style={{ color: COLOR.text, fontSize: 11 }}>{clock}</span>
+                    </div>
                 </div>
 
                 {/* 内容区 */}
@@ -545,23 +596,23 @@ function InfoPanel({ runtime, activeRundown, stats }: {
                         <TimingBox label="实际时长" value={elapsedMs > 0 ? fmtMs(elapsedMs) : '—'} />
                     </div>
 
-                    {/* 下：核心信息（偏差 + Countdown） */}
+                    {/* 下：节目余量 + 实时偏差 + Countdown */}
                     <div style={{ display: 'flex', gap: 12 }}>
                         <TimingBox
-                            label="当前偏差"
-                            value={elapsedMs > 0 ? fmtDiff(currentDiffMs) : '—'}
-                            color={currentDiffMs > 0 ? '#ff4444' : currentDiffMs < 0 ? '#00ff88' : '#ffffff'}
+                            label="节目余量"
+                            value={roEdDurDiffMs !== null ? fmtDiff(roEdDurDiffMs) : '—'}
+                            color={roEdDurDiffMs !== null && roEdDurDiffMs > 0 ? '#ff4444' : roEdDurDiffMs !== null && roEdDurDiffMs < 0 ? '#00ff88' : '#ffffff'}
                         />
                         <TimingBox
-                            label="累计偏差"
-                            value={stats.playedMs > 0 ? fmtDiff(accumDiffMs) : '—'}
-                            color={accumDiffMs > 0 ? '#ff4444' : accumDiffMs < 0 ? '#00ff88' : '#ffffff'}
+                            label="实时偏差"
+                            value={runtime?.onAirPartId && accumDiffMs !== null ? fmtDiff(accumDiffMs) : '—'}
+                            color={accumDiffMs !== null && accumDiffMs > 0 ? '#ff4444' : accumDiffMs !== null && accumDiffMs < 0 ? '#00ff88' : '#ffffff'}
                         />
                         <TimingBox
                             label="COUNTDOWN"
                             value={isVideo && elapsedMs > 0 ? fmtMs(countdownMs) : '—'}
                             color={countdownMs < 10_000 && isVideo ? '#ff4444' : '#ffffff'}
-                            flex={2}  // countdown 框更宽
+                            flex={2}
                         />
                     </div>
                 </div>
