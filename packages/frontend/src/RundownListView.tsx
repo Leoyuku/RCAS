@@ -112,12 +112,17 @@ function ThumbnailPlaceholder({ type, isOnAir, isPreview, proxyUrl, airStatus, f
             overflow: 'hidden',
             // ── 源代码原有的 boxShadow 逻辑，完全保留 ──
             boxShadow: isOnAir
-                ? '0 0 0 4px #f8071d, 0 0 12px 3px rgb(251, 255, 0)'
+                ? '0 0 0 4px #f8071d, 0 0 16px 6px rgba(255,255,255,0.9)'
                 : isPreview
-                    ? '0 0 0 4px rgb(10, 194, 99), 0 0 12px 3px rgb(251, 255, 0)'
+                    ? '0 0 0 4px rgb(10,194,99), 0 0 16px 6px rgba(255,255,255,0.9)'
                     : isNotReady
                         ? '0 0 0 2px rgb(255,140,0)'
                         : '0 0 0 1px rgba(255,255,255,0.08)',
+            animation: isOnAir
+                ? 'rcas-pgm-pulse 1.5s ease-in-out infinite'
+                : isPreview
+                    ? 'rcas-pvw-pulse 2.5s ease-in-out infinite'
+                    : 'none',
         }}>
 
             {/* ── CAM 实时帧 ── */}
@@ -291,7 +296,18 @@ function injectAnimations() {
     if (document.getElementById('rcas-rl-anim')) return
     const style = document.createElement('style')
     style.id = 'rcas-rl-anim'
-    style.textContent = `@keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }`
+    //style.textContent = `@keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }`
+    style.textContent = `
+        @keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes rcas-pgm-pulse {
+            0%,100% { box-shadow: 0 0 0 4px #f8071d, 0 0 16px 6px rgba(255,255,255,0.9); }
+            50%     { box-shadow: 0 0 0 4px rgba(248,7,29,0.3), 0 0 6px 2px rgba(255,255,255,0.2); }
+        }
+        @keyframes rcas-pvw-pulse {
+            0%,100% { box-shadow: 0 0 0 4px rgb(10,194,99), 0 0 16px 6px rgba(255,255,255,0.9); }
+            50%     { box-shadow: 0 0 0 4px rgba(10,194,99,0.3), 0 0 6px 2px rgba(255,255,255,0.2); }
+        }
+    `
     document.head.appendChild(style)
 }
 
@@ -498,6 +514,11 @@ interface StoryRowItemProps {
 const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
     ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled, rundown }, ref) => {
         const [hovered, setHovered] = useState(false)
+        const hoveredSegmentId = useRCASStore(s => s.hoveredSegmentId)
+        const isKeyboardHovered = hoveredSegmentId === (row.segment._id as string)
+        const isKeyboardMode = useRCASStore(s => s.isKeyboardMode)
+        const setKeyboardMode = useRCASStore(s => s.setKeyboardMode)
+        const setHoveredSegmentId = useRCASStore(s => s.setHoveredSegmentId)
         // ── 覆盖相关 ──────────────────────────────────────────────────────────────
         const partOverrides = useRCASStore(s => s.overrides)
         const setPartOverride  = useRCASStore(s => s.setPartOverride)
@@ -583,8 +604,16 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                 onDragOver={(e) => {
                     e.preventDefault()
                 }}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
+                onMouseEnter={() => { setHovered(true); setHoveredSegmentId(row.segment._id as string); setKeyboardMode(false) }}
+                onMouseLeave={() => { setHovered(false); setHoveredSegmentId(null) }}
+                onClick={() => { setHoveredSegmentId(row.segment._id as string); setKeyboardMode(false) }}
+                onDoubleClick={(e) => {
+                    if ((e.target as HTMLElement).closest('[data-part-id]')) return
+                    const firstPart = row.parts[0]
+                    if (firstPart && !disabled && !isOnAir) {
+                        onSetNext(firstPart._id as string)
+                    }
+                }}
             >
                 {/* PG */}
                 <div style={{
@@ -686,6 +715,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                     <div
                                         key={partId}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 3 }}
+                                        data-part-id={partId}
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onContextMenu={(e) => handleContextMenu(e, part)}
                                         onClick={() => {
@@ -832,7 +862,7 @@ const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                     background: overlayGradient,
                     pointerEvents: 'none',
                     zIndex: 4,
-                    boxShadow: hovered && !isOnAir && !isPreview
+                    boxShadow: (isKeyboardHovered || (hovered && !isKeyboardMode)) && !isOnAir && !isPreview
                         ? 'inset 0 0 0 3px rgba(255,255,255,1)'
                         : 'none',
                 }} />

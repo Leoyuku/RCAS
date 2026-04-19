@@ -20,7 +20,7 @@ import type { IRundown } from '../../core-lib/src/models/rundown-model'
 import type { ISegment } from '../../core-lib/src/models/segment-model'
 import type { IPart } from '../../core-lib/src/models/part-model'
 import { PartType } from '../../core-lib/src/models/enums'
-import { TOOLBAR_HEIGHT } from '../../core-lib/src/ui/ui-constants'
+import { TOOLBAR_HEIGHT, SOURCE_CARD_ROWS, DDR_TOOLBAR_HEIGHT, CG_PREVIEW_HEIGHT } from '../../core-lib/src/ui/ui-constants'
 
 // ─── 颜色 / 常量 ─────────────────────────────────────────────────────────────
 
@@ -100,12 +100,59 @@ export default function App() {
                 if (isRunning) take()
             } else if (e.code === 'Enter') {
                 e.preventDefault()
-            } else if (e.code === 'F11') {
+            } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                const store = useRCASStore.getState()
+                const rows = (store.activeRundown?.segments ?? [])
+                    .filter(seg => (seg.parts ?? []).length > 0)
+                    .map(seg => ({
+                        segmentId: seg._id as string,
+                        parts: seg.parts ?? [],
+                    }))
+                if (rows.length === 0) return
+                store.setKeyboardMode(true)
                 e.preventDefault()
-                document.documentElement.requestFullscreen?.()
-            } else if (e.code === 'Escape') {
-                setShowRundownPanel(false)
-                setSelectedId(null)
+            
+                const currentSegIdx = rows.findIndex(r => r.segmentId === store.hoveredSegmentId)
+            
+                if (e.code === 'ArrowUp') {
+                    const targetIdx = currentSegIdx <= 0 ? 0 : currentSegIdx - 1
+                    store.setHoveredSegmentId(rows[targetIdx].segmentId)
+                    store.setHoveredPartId(rows[targetIdx].parts[0]?._id as string ?? null)
+                }
+            
+                if (e.code === 'ArrowDown') {
+                    const targetIdx = currentSegIdx === -1 ? 0
+                        : currentSegIdx >= rows.length - 1 ? rows.length - 1
+                        : currentSegIdx + 1
+                    store.setHoveredSegmentId(rows[targetIdx].segmentId)
+                    store.setHoveredPartId(rows[targetIdx].parts[0]?._id as string ?? null)
+                }
+            
+                if (e.code === 'ArrowLeft') {
+                    if (currentSegIdx === -1) return
+                    const currentRow = rows[currentSegIdx]
+                    const currentPartIdx = currentRow.parts.findIndex(p => (p._id as string) === store.hoveredPartId)
+                    if (currentPartIdx > 0) {
+                        store.setHoveredPartId(currentRow.parts[currentPartIdx - 1]._id as string)
+                    } else if (currentSegIdx > 0) {
+                        const prevRow = rows[currentSegIdx - 1]
+                        store.setHoveredSegmentId(prevRow.segmentId)
+                        store.setHoveredPartId(prevRow.parts[prevRow.parts.length - 1]?._id as string ?? null)
+                    }
+                }
+            
+                if (e.code === 'ArrowRight') {
+                    if (currentSegIdx === -1) return
+                    const currentRow = rows[currentSegIdx]
+                    const currentPartIdx = currentRow.parts.findIndex(p => (p._id as string) === store.hoveredPartId)
+                    if (currentPartIdx < currentRow.parts.length - 1) {
+                        store.setHoveredPartId(currentRow.parts[currentPartIdx + 1]._id as string)
+                    } else if (currentSegIdx < rows.length - 1) {
+                        const nextRow = rows[currentSegIdx + 1]
+                        store.setHoveredSegmentId(nextRow.segmentId)
+                        store.setHoveredPartId(nextRow.parts[0]?._id as string ?? null)
+                    }
+                }
             }
         }
         window.addEventListener('keydown', handler)
@@ -328,7 +375,7 @@ export default function App() {
                         rundown={activeRundown!}
                         runtime={runtime}
                         onSetNext={connected ? setNext : () => {}}
-                        disabled={!connected}
+                        disabled={!connected || !isRunning}
                     />
                 ) : (
                     <div style={{
@@ -915,9 +962,17 @@ function Header({ connected, rundownName, engineState, onOpenRundown, onRun, isR
 // ─── 右侧操作区 ───────────────────────────────────────────────────────────────
 
 function RightPanel() {
+    const hoveredSegmentId = useRCASStore(s => s.hoveredSegmentId)
+    const activeRundown = useRCASStore(s => s.activeRundown)
+    const hoveredSegment = hoveredSegmentId
+        ? (activeRundown?.segments ?? []).find(s => s._id === hoveredSegmentId) ?? null
+        : null
     const { sources } = useRCASStore()
     const [activeTab, setActiveTab] = useState<string>('camera')
     const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+    const CARD_HEIGHT = 68
+    const CARD_GAP = 6
+    const CARD_PADDING = 6
 
     // 按 type 分组，动态生成 Tab 列表
     const TAB_LABELS: Record<string, string> = {
@@ -997,7 +1052,7 @@ function RightPanel() {
                                 letterSpacing: '0.06em',
                                 userSelect: 'none',
                                 borderRadius: 0,
-                                border: 'none',          // ← 完全去掉边框
+                                border: 'none',
                                 marginBottom: 0,
                                 fontWeight: activeTab === type ? 700 : 400,
                                 color: activeTab === type ? '#FFFFFF' : COLOR.textDim,
@@ -1009,18 +1064,19 @@ function RightPanel() {
                     ))}
                 </div>
 
-                {/* Tab 内容区：源卡片 */}
+                {/* Tab 内容区：源卡片（固定高度） */}
                 <div style={{
-                    flex: 1,
+                    height: CARD_PADDING * 2 + SOURCE_CARD_ROWS * CARD_HEIGHT + (SOURCE_CARD_ROWS - 1) * CARD_GAP + DDR_TOOLBAR_HEIGHT,
+                    flexShrink: 0,
                     overflowY: 'auto',
-                    padding: 6,
+                    padding: CARD_PADDING,
                     display: 'flex',
                     flexWrap: 'wrap',
                     alignContent: 'flex-start',
-                    gap: 6,
+                    gap: CARD_GAP,
                     border: 'none',
                     margin: 0,
-                    background: '#3a4a5c',   // ← 和选中标签同色
+                    background: '#3a4a5c',
                 }}>
                     {/* DDR Tab 单独处理 */}
                     {['ddr1','ddr2','ddr3','ddr4'].includes(activeTab) ? (
@@ -1061,6 +1117,81 @@ function RightPanel() {
                         </>
                     )}
                 </div>
+
+                {/* ── CG 预览区 ── */}
+                <div style={{
+                    height: TOOLBAR_HEIGHT + CG_PREVIEW_HEIGHT,
+                    flexShrink: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    borderTop: `1px solid ${COLOR.border}`,
+                }}>
+                    {/* 标题栏 */}
+                    <div style={{
+                        height: TOOLBAR_HEIGHT,
+                        flexShrink: 0,
+                        borderBottom: `1px solid ${COLOR.border}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0 10px',
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.12em',
+                        color: COLOR.textDim,
+                    }}>
+                        <span>CG PREVIEW</span>
+                    </div>
+
+                    {/* 预览画面区 */}
+                    <div style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'row',    // ← 改为横向
+                        alignItems: 'stretch',   // ← 改为撑满高度
+                        background: '#000',
+                        position: 'relative',
+                        overflow: 'hidden',
+                    }}>
+                        {/* 左：PG 号 */}
+                        <div style={{
+                            width: 200,
+                            flexShrink: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRight: `1px solid ${COLOR.border}`,
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: 36,
+                            fontWeight: 700,
+                            color: hoveredSegment ? COLOR.text : COLOR.textDim,
+                            opacity: hoveredSegment ? 1 : 0.3,
+                        }}>
+                            {hoveredSegment?.storyNum ?? '—'}
+                        </div>
+
+                        {/* 中：预览内容区 */}
+                        <div style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}>
+                            {/* 联调后在此加 <img src={cgFrameUrl} ... /> */}
+                            <div style={{
+                                color: COLOR.textDim,
+                                fontFamily: '"JetBrains Mono", monospace',
+                                fontSize: 10,
+                                opacity: 0.4,
+                            }}>
+                                — 待接入 VIZ —
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     )

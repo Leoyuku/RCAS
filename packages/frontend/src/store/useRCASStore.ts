@@ -36,6 +36,10 @@ interface RCASStore {
     activeRundown: IRundown | null
     runtime: RundownRuntime | null
     overrides: Record<string, PartOverride>
+    hoveredSegmentId: string | null
+    hoveredPartId: string | null      //左右方向键用
+    isKeyboardMode: boolean
+    setKeyboardMode: (v: boolean) => void
     tricasterHost: string | null
     plannedDuration: number | null
     tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
@@ -49,6 +53,8 @@ interface RCASStore {
     setNext: (partId: string) => void
     setPartOverride: (partId: string, sourceId: string, ddrFile?: string) => void
     clearPartOverride: (partId: string) => void
+    setHoveredSegmentId: (id: string | null) => void
+    setHoveredPartId: (id: string | null) => void
     addSource: (source: { id: string; label: string; type: string; previewSrc: string; switcherName: string }) => Promise<void>
 
     _initSocket: () => void
@@ -66,6 +72,9 @@ export const useRCASStore = create<RCASStore>((set) => ({
     activeRundown: null,
     runtime: null,
     overrides: {},
+    hoveredSegmentId: null,
+    hoveredPartId: null,
+    isKeyboardMode: false,
     sources: {},
     tricasterHost: null,
     plannedDuration: null,
@@ -257,6 +266,10 @@ export const useRCASStore = create<RCASStore>((set) => ({
             if (!result?.ok) console.error('[Socket] CLEAR PART OVERRIDE failed:', result?.error)
         })
     },
+
+    setHoveredSegmentId: (id) => set({ hoveredSegmentId: id }),
+    setHoveredPartId: (id) => set({ hoveredPartId: id }),
+    setKeyboardMode: (v) => set({ isKeyboardMode: v }),
 
     addSource: async (source) => {
         const res = await fetch('/api/device/config')
