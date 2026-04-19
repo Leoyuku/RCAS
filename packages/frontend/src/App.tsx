@@ -87,7 +87,6 @@ export default function App() {
     const [isRunning, setIsRunning] = useState(false)
     const [showRundownPanel, setShowRundownPanel] = useState(false)
     const [selectedId, setSelectedId]             = useState<string | null>(null)
-    const [stats, setStats] = useState({ totalMs: 0, playedMs: 0, remainMs: 0, expectedEnd: 0 })
 
     useEffect(() => {
         _initSocket()
@@ -322,7 +321,6 @@ export default function App() {
                 <InfoPanel
                     runtime={runtime}
                     activeRundown={activeRundown}
-                    stats={stats}
                 />
                 {/* ── Rundown 列表 ── */}
                 {hasRundown ? (
@@ -331,7 +329,6 @@ export default function App() {
                         runtime={runtime}
                         onSetNext={connected ? setNext : () => {}}
                         disabled={!connected}
-                        onStatsChange={setStats}
                     />
                 ) : (
                     <div style={{
@@ -380,10 +377,9 @@ export default function App() {
 
 // ─── InfoPanel ────────────────────────────────────────────────────────────────
 
-function InfoPanel({ runtime, activeRundown, stats }: {
+function InfoPanel({ runtime, activeRundown }: {
     runtime: RundownRuntime | null
     activeRundown: IRundown | null
-    stats: { totalMs: number; playedMs: number; remainMs: number; expectedEnd: number }
 }) {
     const { display: clock, syncing: clockSyncing, sync: syncClock } = useClock()
     const [leftPct, setLeftPct] = useState(50)
