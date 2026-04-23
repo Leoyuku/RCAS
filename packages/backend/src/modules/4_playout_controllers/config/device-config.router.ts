@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express'
-import { exec } from 'child_process'
+import { exec, execSync } from 'child_process'
 import os from 'os'
 import { deviceConfigService } from './device-config.service'
 import { playoutController } from '../playout-controller'
@@ -167,13 +167,21 @@ deviceConfigRouter.get('/files/browse', (req: Request, res: Response) => {
     // Windows: 各磁盘根目录；其他系统: /
     if (!dirPath) {
         if (process.platform === 'win32') {
-            // 返回所有盘符
-            const drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\', 'Z:\\']
-                .filter(d => { try { fs.accessSync(d); return true } catch { return false } })
-                .map(d => ({ name: d, fullPath: d, isDirectory: true }))
+            let drives: { name: string; fullPath: string; isDirectory: boolean }[] = []
+            try {
+                const output = execSync('wmic logicaldisk get name', { encoding: 'utf8' })
+                drives = output
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(line => /^[A-Z]:$/.test(line))
+                    .map(letter => `${letter}\\`)
+                    .map(d => ({ name: d, fullPath: d, isDirectory: true }))
+            } catch {
+                drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\', 'H:\\', 'Z:\\']
+                    .filter(d => { try { fs.accessSync(d); return true } catch { return false } })
+                    .map(d => ({ name: d, fullPath: d, isDirectory: true }))
+            }
             res.json({ entries: drives, current: '' })
-        } else {
-            res.json({ entries: [{ name: '/', fullPath: '/', isDirectory: true }], current: '' })
         }
         return
     }

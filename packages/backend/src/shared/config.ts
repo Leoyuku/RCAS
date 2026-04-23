@@ -43,7 +43,7 @@ export const config = {
 
     // ─── Tricaster 设备配置 ───────────────────────────────────────────────────────
     // Tricaster 设备配置
-    tricasterHost:    process.env.TRICASTER_HOST    ?? '192.168.17.159',
+    tricasterHost:    process.env.TRICASTER_HOST    ?? '192.168.17.164',
     tricasterPort:    parseInt(process.env.TRICASTER_PORT ?? '80'),
     tricasterEnabled: process.env.TRICASTER_ENABLED !== 'false',
 

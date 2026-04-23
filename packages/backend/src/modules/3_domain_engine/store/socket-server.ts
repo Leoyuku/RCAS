@@ -79,6 +79,7 @@ export class SocketServer {
             const summaries = rundownStore.getAllSummaries();
             // 连接后立即推送全量摘要快照
             socket.emit('snapshot', { summaries });
+            socket.emit('device:status', { tricaster: tricasterDriver.connectionStatus })
 
             // 补推当前覆盖状态
             const currentOverrides = runtimeOverrideStore.getAll()

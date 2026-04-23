@@ -240,19 +240,18 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
      * 隔离 XML 结构的不确定性，联调后如果路径不对只改这一处
      */
     private _extractInputs(parsed: any): any[] | null {
-        // 尝试各种可能的路径
         const candidates = [
+            parsed?.switcher_update?.inputs?.physical_input,
             parsed?.switcher_update?.inputs?.input,
-            parsed?.switcher?.inputs?.input,
-            parsed?.inputs?.input,
+            parsed?.switcher?.inputs?.physical_input,
+            parsed?.inputs?.physical_input,
         ]
-
+    
         for (const candidate of candidates) {
             if (!candidate) continue
-            // fast-xml-parser：单个元素返回对象，多个元素返回数组
             return Array.isArray(candidate) ? candidate : [candidate]
         }
-
+    
         return null
     }
 

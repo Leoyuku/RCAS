@@ -297,7 +297,7 @@ export class TricasterClient extends EventEmitter<TricasterClientEvents> {
 
     /**
      * 发送单个 shortcut 命令
-     * 格式：{ "shortcut": "main_background_take" }
+     * 格式：name=main_background_take 或 name=main_b_row_named_input&value=INPUT1
      * 或带值：{ "shortcut": "main_b_row_named_input", "value": "CAM 1" }
      */
     sendShortcut(name: string, value?: string): boolean {
@@ -305,12 +305,13 @@ export class TricasterClient extends EventEmitter<TricasterClientEvents> {
             logger.warn(`[TricasterClient] Cannot send shortcut "${name}": control channel not open`)
             return false
         }
-
+    
+        // ✅ 已联调确认：格式为 "name=xxx&value=xxx"，不是 JSON
         const payload = value !== undefined
-            ? { shortcut: name, value }
-            : { shortcut: name }
-
-        this._controlWs.send(JSON.stringify(payload))
+            ? `name=${name}&value=${value}`
+            : `name=${name}`
+    
+        this._controlWs.send(payload)
         logger.debug(`[TricasterClient] Sent shortcut: ${name}${value !== undefined ? ` = ${value}` : ''}`)
         return true
     }
