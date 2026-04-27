@@ -13,21 +13,18 @@
  */
 
 import { COLOR } from '../utils/formatters'
-import { useTricasterFrame } from '../hooks/useTricasterFrame'
+import { useFramePool } from '../contexts/FramePoolContext'
 
 interface SourceCardProps {
     source:        { id: string; label: string; type: string; previewSrc?: string }
     isSelected:    boolean
-    tricasterHost: string | null
     onSelect:      () => void
     onDragStart:   (e: React.DragEvent<HTMLDivElement>) => void
 }
 
-export default function SourceCard({ source, isSelected, tricasterHost, onSelect, onDragStart }: SourceCardProps) {
-    const frameUrl = useTricasterFrame(
-        tricasterHost,
-        source.previewSrc ?? null
-    )
+export default function SourceCard({ source, isSelected, onSelect, onDragStart }: SourceCardProps) {
+    const framePool = useFramePool()
+    const frameUrl  = source.previewSrc ? (framePool[source.previewSrc] ?? null) : null
 
     return (
         <div

@@ -20,7 +20,7 @@
         "dskLayers": 4
       },
       "connection": {
-        "host": "192.168.17.164",
+        "host": "192.168.17.159",
         "port": 80
       },
       "mePreviewMode": "direct"

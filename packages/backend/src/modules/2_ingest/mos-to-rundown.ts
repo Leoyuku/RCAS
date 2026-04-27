@@ -192,6 +192,7 @@ function itemToPart(item: IMOSItem, segmentId: string, rank: number, storySlug: 
         expectedDuration: duration,
         autoNext:         false,
         autoNextOverlap:  0,
+        sourceId,
         type:             partType,
         pieces,
     }

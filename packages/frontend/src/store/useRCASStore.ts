@@ -43,7 +43,7 @@ interface RCASStore {
     tricasterHost: string | null
     plannedDuration: number | null
     tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
-    sources: Record<string, { id: string; label: string; type: string }>
+    sources: Record<string, { id: string; label: string; type: string; previewSrc?: string; switcherName?: string }>
 
     activate: (id: string) => void
     run: () => void

@@ -15,11 +15,12 @@
 import { COLOR } from '../utils/formatters'
 import { TOOLBAR_HEIGHT } from '../../../core-lib/src/ui/ui-constants'
 
-export function Header({ connected, rundownName, engineState, onOpenRundown, onRun, isRunning, hasRundown, tricasterStatus }: {
+export function Header({ connected, rundownName, engineState, onOpenRundown, onOpenConfig, onRun, isRunning, hasRundown, tricasterStatus }: {
     connected:       boolean
     rundownName:     string | null
     engineState:     string
     onOpenRundown:   () => void
+    onOpenConfig:    () => void
     onRun:           () => void
     isRunning:       boolean
     hasRundown:      boolean
@@ -141,6 +142,23 @@ export function Header({ connected, rundownName, engineState, onOpenRundown, onR
                 }}
             >
                 RUNDOWN ▾
+            </button>
+
+            <button
+                onClick={onOpenConfig}
+                style={{
+                    fontFamily:    '"JetBrains Mono", monospace',
+                    fontSize:      14,
+                    color:         COLOR.textDim,
+                    background:    'transparent',
+                    border:        `1px solid ${COLOR.border}`,
+                    padding:       '3px 8px',
+                    borderRadius:  2,
+                    cursor:        'pointer',
+                    lineHeight:    1,
+                }}
+            >
+                ⚙
             </button>
 
             {/* ENGINE 状态 */}

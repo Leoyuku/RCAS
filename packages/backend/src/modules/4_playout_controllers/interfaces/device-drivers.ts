@@ -43,9 +43,11 @@ export interface ISwitcherDriver extends IBaseDriver {
 
     // — DDR（仅 canReceiveDDR = true 时有意义）—
     // ddr 参数来自 device-config.json ddrMapping，由 PlayoutController 传入
-    loadClip(clipId: string, ddr: string): Promise<void>
-    playDDR(ddr: string): Promise<void>
-    stopDDR(ddr: string): Promise<void>
+    //loadClip(clipId: string, ddr: string): Promise<void>
+    //playDDR(ddr: string): Promise<void>
+    //stopDDR(ddr: string): Promise<void>
+    // — 预监切换 —
+    setPreview(sourceId: string): Promise<void>
 
     // — DSK（仅 dsk = true 时有意义）—
     // layer 参数来自 device-config.json dskMapping[pieceType]，由 PlayoutController 传入
@@ -84,7 +86,12 @@ export interface IVideoServerDriver extends IBaseDriver {
     getClipInfo(clipId: string): Promise<ClipInfo>
 
     // — 推送到切换台 DDR（仅 canPushToDDR = true 时有意义）—
+    //pushToDDR?(clipId: string, ddr: string): Promise<void>
     pushToDDR?(clipId: string, ddr: string): Promise<void>
+    selectFile?(clipId: string, channel: string): Promise<void>
+    loadClip?(clipId: string, ddr: string): Promise<void>
+    playDDR?(ddr: string): Promise<void>
+    stopDDR?(ddr: string): Promise<void>
 }
 
 // ─── 图形引擎接口 ─────────────────────────────────────────────────────────────

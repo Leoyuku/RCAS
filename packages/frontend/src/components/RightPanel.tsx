@@ -27,6 +27,7 @@ import { useRCASStore } from '../store/useRCASStore'
 import { COLOR } from '../utils/formatters'
 import { TOOLBAR_HEIGHT, SOURCE_CARD_ROWS, DDR_TOOLBAR_HEIGHT, CG_PREVIEW_HEIGHT } from '../../../core-lib/src/ui/ui-constants'
 import MonitorPlaceholder from './MonitorPlaceholder'
+import { useFramePool } from '../contexts/FramePoolContext'
 import DDRPanel from './DDRPanel'
 import SourceCard from './SourceCard'
 import AddSourceCard from './AddSourceCard'
@@ -63,6 +64,23 @@ export function RightPanel() {
     // 当前 Tab 的源列表
     const currentSources = Object.values(sources).filter(s => s.type === activeTab)
     const tricasterHost = useRCASStore(s => s.tricasterHost)
+    const runtime   = useRCASStore(s => s.runtime)
+    const framePool = useFramePool()
+
+    function getPreviewSrc(partId: string | null | undefined): string | null {
+        if (!partId || !activeRundown) return null
+        for (const seg of activeRundown.segments ?? []) {
+            const part = seg.parts?.find(p => (p._id as string) === partId)
+            if (!part) continue
+            const sourceId = (part as any).sourceId
+            if (!sourceId) return null
+            return (sources[sourceId] as any)?.previewSrc ?? null
+        }
+        return null
+    }
+
+    const pvwSrc = getPreviewSrc(runtime?.previewPartId)
+    const pgmSrc = getPreviewSrc(runtime?.onAirPartId)
 
     return (
         <div style={{
@@ -79,8 +97,16 @@ export function RightPanel() {
                 background: COLOR.border,
                 flexShrink: 0,
             }}>
-                <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
-                <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
+                {pvwSrc && framePool[pvwSrc] ? (
+                    <img src={framePool[pvwSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PVW" />
+                ) : (
+                    <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
+                )}
+                {pgmSrc && framePool[pgmSrc] ? (
+                    <img src={framePool[pgmSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PGM" />
+                ) : (
+                    <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
+                )}
             </div>
 
             {/* ── 源面板 ── */}
@@ -170,7 +196,6 @@ export function RightPanel() {
                                     key={source.id}
                                     source={source}
                                     isSelected={selectedSourceId === source.id}
-                                    tricasterHost={activeTab === 'camera' ? tricasterHost : null}
                                     onSelect={() => setSelectedSourceId(source.id)}
                                     onDragStart={(e) => {
                                         e.dataTransfer.setData('sourceId', source.id)

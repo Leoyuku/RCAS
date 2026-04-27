@@ -61,6 +61,10 @@
 import { useEffect, useState } from 'react'
 import RundownListView from './RundownListView'
 import { useRCASStore } from './store/useRCASStore'
+import { useMemo } from 'react'
+import { useTricasterFramePool } from './hooks/useTricasterFramePool'
+import { FramePoolContext } from './contexts/FramePoolContext'
+import ConfigPanel from './components/ConfigPanel'
 import { InfoPanel } from './components/InfoPanel'
 import { COLOR } from './utils/formatters'
 import { Header } from './components/Header'
@@ -75,8 +79,28 @@ export default function App() {
         tricasterStatus,
     } = useRCASStore()
 
+    const sources       = useRCASStore(s => s.sources)
+    const tricasterHost = useRCASStore(s => s.tricasterHost)
+
+    const previewSrcs = useMemo(() => {
+        if (!activeRundown || !sources) return []
+        const seen = new Set<string>()
+        for (const segment of activeRundown.segments ?? []) {
+            for (const part of segment.parts ?? []) {
+                const sourceId = (part as any).sourceId
+                if (!sourceId) continue
+                const src = (sources[sourceId] as any)?.previewSrc
+                if (src) seen.add(src)
+            }
+        }
+        return [...seen]
+    }, [activeRundown, sources])
+
+    const framePool = useTricasterFramePool(tricasterHost, previewSrcs)
+
     const [isRunning, setIsRunning] = useState(false)
     const [showRundownPanel, setShowRundownPanel] = useState(false)
+    const [showConfigPanel, setShowConfigPanel] = useState(false)
     const [selectedId, setSelectedId]             = useState<string | null>(null)
 
     useEffect(() => {
@@ -158,6 +182,9 @@ export default function App() {
     const hasRundown = activeRundown !== null
 
     return (
+        <FramePoolContext.Provider value={framePool}>
+
+    return (
         <div 
         style={{
             display:       'flex',
@@ -176,6 +203,7 @@ export default function App() {
                 rundownName={activeSum?.name ?? activeRundown?.name ?? null}
                 engineState={engineState}
                 onOpenRundown={() => setShowRundownPanel(true)}
+                onOpenConfig={() => setShowConfigPanel(true)}
                 onRun={() => {
                     if (!isRunning) {
                         run()
@@ -328,6 +356,10 @@ export default function App() {
                 </div>
             )}
 
+            {showConfigPanel && (
+                <ConfigPanel onClose={() => setShowConfigPanel(false)} />
+            )}
+
             {/* ── 断线横幅 ── */}
             {isDisconnected && (
                 <div style={{
@@ -410,6 +442,7 @@ export default function App() {
                 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
             `}</style>
         </div>
+        </FramePoolContext.Provider>
     )
 }
 

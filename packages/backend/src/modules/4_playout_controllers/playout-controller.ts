@@ -18,6 +18,7 @@ import { rundownEngine } from '../3_domain_engine/engine/rundown-engine'
 import { rundownStore } from '../3_domain_engine/store/rundown-store'
 import { logger } from '../../shared/logger'
 import { tricasterDriver } from './tricaster/tricaster-driver'
+import { tricasterDDRDriver } from './tricaster/tricaster-ddr-driver'
 import type { ISwitcherDriver } from './interfaces/device-drivers'
 import type { IVideoServerDriver } from './interfaces/device-drivers'
 import type { RundownRuntime } from '../../../../core-lib/src/socket/socket-contracts'
@@ -181,29 +182,25 @@ export class PlayoutController {
             return
         }
     
-        await (this._switcher as any).setPreview(source.switcherName)
+        await this._switcher.setPreview(intent.sourceId)
         await this._switcher.take()
-        logger.info(`[PlayoutController] KAM take: ${intent.sourceId} → ${source.switcherName}`)
+        logger.info(`[PlayoutController] KAM take: ${intent.sourceId}`)
     }
 
     // ── SERVER/VO（视频服务器播出）────────────────────────────────────────────────
 
     private async _executeServerTake(intent: PartPlayoutIntent, config: DeviceConfigFile): Promise<void> {
-        // 没有视频服务器驱动 → 降级为直接切换 input
+        // 没有外部视频服务器 → 使用 TricasterDDRDriver
         if (!this._videoServer) {
-            logger.warn('[PlayoutController] No videoServer driver, falling back to input switch')
             if (intent.sourceId) {
                 const source = config.sources[intent.sourceId]
                 const sourceType = source?.type ?? ''
-        
+
                 if (sourceType.startsWith('ddr') && intent.ddrFile) {
-                    // DDR 两步：先选文件，再切预监
-                    const ddrCmd = sourceType  // 'ddr1' / 'ddr2' / 'ddr3' / 'ddr4'
-                    await (this._switcher as any).sendShortcut(`${ddrCmd}_select_file`, intent.ddrFile)
-                    logger.info(`[PlayoutController] DDR select file: ${ddrCmd} → "${intent.ddrFile}"`)
-                    await (this._switcher as any).setPreview(source.switcherName)
-                } else if (source?.switcherName) {
-                    await (this._switcher as any).setPreview(source.switcherName)
+                    await tricasterDDRDriver.selectFile(intent.ddrFile, sourceType)
+                    await this._switcher.setPreview(intent.sourceId)
+                } else if (intent.sourceId) {
+                    await this._switcher.setPreview(intent.sourceId)
                 }
             }
             await this._switcher.take()
@@ -228,8 +225,7 @@ export class PlayoutController {
 
             // 切换台切到对应输入口
             if (intent.sourceId) {
-                const source = config.sources[intent.sourceId]
-                if (source?.switcherName) await (this._switcher as any).setPreview(source.switcherName)
+                await this._switcher.setPreview(intent.sourceId)
             }
             await this._switcher.take()
             logger.info(`[PlayoutController] SERVER take (canPlayVideo): clip=${intent.clipId}, channel=${channel}`)
@@ -243,8 +239,8 @@ export class PlayoutController {
             }
             const ddr = 'ddr1'  // 来自 config，联调时从 ddrMapping 读
             await vs.pushToDDR(intent.clipId, ddr)
-            await this._switcher.loadClip(intent.clipId, ddr)
-            await this._switcher.playDDR(ddr)
+            await vs.loadClip?.(intent.clipId, ddr)
+            await vs.playDDR?.(ddr)
             await this._switcher.take()
             logger.info(`[PlayoutController] SERVER take (canPushToDDR): clip=${intent.clipId}, ddr=${ddr}`)
 

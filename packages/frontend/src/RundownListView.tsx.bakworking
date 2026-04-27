@@ -1,0 +1,900 @@
+/**
+ * @file RundownListView.tsx
+ * @description RCAS Rundown 列表组件 — 折叠模式（第一轮默认）
+ *
+ * 修改记录 2026-03-21 v2：
+ *   统一纯色底 + 顶层遮罩方案
+ *   - 所有行：纯色底，渐变完全交给遮罩层
+ *   - 遮罩统一只做一件事：顶部轻微高光，底部变暗
+ *   - ON AIR：纯红色底
+ *   - PREVIEW：纯绿色底
+ *   - 已播/未播：纯灰色底
+ *   - 缩略图半透明，自然融入各种底色
+ */
+
+import { useMemo, useRef, useEffect, useState, forwardRef } from 'react'
+import type { IRundown } from '../../core-lib/src/models/rundown-model'
+import type { ISegment } from '../../core-lib/src/models/segment-model'
+import type { IPart } from '../../core-lib/src/models/part-model'
+import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
+import { PartType } from '../../core-lib/src/models/enums'
+import { useRCASStore } from './store/useRCASStore'
+import { useFramePool } from './contexts/FramePoolContext'
+import ReactDOM from 'react-dom'
+import { TOOLBAR_HEIGHT } from '../../core-lib/src/ui/ui-constants'
+
+// ─── 颜色系统 ─────────────────────────────────────────────────────────────────
+
+const C = {
+    bgBase: '#090b0e',
+    bgSurface: '#0d1117',
+    bgRaised: '#1a1f28',
+    border: '#1e2530',
+    borderMid: '#252d3a',
+    borderStrong: '#2d3848',
+    textPrimary: '#dde4ee',
+    textSec: '#FFFFFF',
+    textDim: '#FFFFFF',
+
+    pgmBorder: '#f8071d',
+    pvwBorder: '#0ac242',
+    pvwLabel: '#0ac242',
+    nxtBorder: '#8a6a00',
+    nxtText: '#e0b830',
+
+    mono: '"IBM Plex Mono", "JetBrains Mono", monospace',
+    sans: '"IBM Plex Sans Condensed", "Helvetica Neue", sans-serif',
+}
+
+// ─── Story 显示类型系统 ───────────────────────────────────────────────────────
+
+type StoryDisplayType =
+    'COLD_OPEN' | 'TEASER' | 'OPENING' | 'COMING_BACK' | 'ENDING' |
+    'PKG' | 'VO' | 'CAM' | 'LIVE' | 'WEATHER' |
+    'BREAK' | 'AD' | 'UNKNOWN'
+
+interface StoryTypeStyle {
+    line1: string
+    line2?: string
+    color: string
+    bg: string
+}
+
+const STORY_TYPE_STYLE: Record<StoryDisplayType, StoryTypeStyle> = {
+    COLD_OPEN: { line1: 'COLD', line2: 'OPEN', color: '#E8572A', bg: 'rgba(232,87,42,.18)' },
+    TEASER: { line1: 'TEASER', color: '#E89020', bg: 'rgba(232,144,32,.18)' },
+    OPENING: { line1: 'OPENING', color: '#D4A800', bg: 'rgba(212,168,0,.18)' },
+    COMING_BACK: { line1: 'COMING', line2: 'BACK', color: '#2A9D8F', bg: 'rgba(42,157,143,.18)' },
+    ENDING: { line1: 'ENDING', color: '#4A7FA5', bg: 'rgba(74,127,165,.18)' },
+    PKG: { line1: 'PKG', color: '#7B5EA7', bg: 'rgba(123,94,167,.18)' },
+    VO: { line1: 'VO', color: '#2E8B57', bg: 'rgba(46,139,87,.18)' },
+    CAM: { line1: 'CAM', color: '#2B6CB0', bg: 'rgba(43,108,176,.18)' },
+    LIVE: { line1: 'LIVE', color: '#C0392B', bg: 'rgba(192,57,43,.18)' },
+    WEATHER: { line1: 'WEATHER', color: '#5B9BD5', bg: 'rgba(91,155,213,.18)' },
+    BREAK: { line1: 'BREAK', color: '#5A6B7A', bg: 'rgba(90,107,122,.18)' },
+    AD: { line1: 'AD', color: '#8B2020', bg: 'rgba(139,32,32,.18)' },
+    UNKNOWN: { line1: '???', color: '#4a5568', bg: 'rgba(74,85,104,.12)' },
+}
+
+// ─── 画面占位符 ───────────────────────────────────────────────────────────────
+
+function ThumbnailPlaceholder({ type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false }: {
+    type: string
+    isOnAir: boolean
+    isPreview: boolean
+    proxyUrl?: string | null
+    airStatus?: string | null
+    frameUrl?: string | null
+    isOverride?: boolean
+}) {
+    // ── 语义判断（UI 层不直接使用 KAM 等 MOS 术语）──────────────────────────
+    const isCamera = type === PartType.KAM
+    const isVideoServer = type === PartType.SERVER || type === PartType.VO
+    const isNotReady = airStatus === 'NOT READY'
+
+    // ── 显示内容决策 ──────────────────────────────────────────────────────────
+    const showCameraFrame = isCamera && !!frameUrl
+    const showProxyImage = isVideoServer && !isNotReady && !!proxyUrl
+    const showNotReady = isVideoServer && isNotReady
+    const showPlaceholder = !showCameraFrame && !showProxyImage && !showNotReady
+
+    return (
+        <div style={{
+            width: 160,
+            height: 90,
+            background: 'rgba(0,0,0,0.28)',
+            borderRadius: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            position: 'relative',
+            overflow: 'hidden',
+            // ── 源代码原有的 boxShadow 逻辑，完全保留 ──
+            boxShadow: isOnAir
+                ? '0 0 0 4px #f8071d, 0 0 16px 6px rgba(255,255,255,0.9)'
+                : isPreview
+                    ? '0 0 0 4px rgb(10,194,99), 0 0 16px 6px rgba(255,255,255,0.9)'
+                    : isNotReady
+                        ? '0 0 0 2px rgb(255,140,0)'
+                        : '0 0 0 1px rgba(255,255,255,0.08)',
+            animation: isOnAir
+                ? 'rcas-pgm-pulse 1.5s ease-in-out infinite'
+                : isPreview
+                    ? 'rcas-pvw-pulse 2.5s ease-in-out infinite'
+                    : 'none',
+        }}>
+
+            {/* ── CAM 实时帧 ── */}
+            {showCameraFrame && (
+                <img
+                    src={frameUrl!}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 2 }}
+                    alt="camera preview"
+                />
+            )}
+
+            {/* ── 视频素材缩略图（源代码原有逻辑，保留 onError 处理）── */}
+            {showProxyImage && (
+                <img
+                    src={proxyUrl!}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 2 }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    alt="clip thumbnail"
+                />
+            )}
+
+            {/* ── NOT READY 警告 ── */}
+            {showNotReady && (
+                <>
+                    <div style={{
+                        fontSize: 18,
+                        opacity: 0.9,
+                        marginBottom: 4,
+                    }}>
+                        ⚠️
+                    </div>
+                    <div style={{
+                        fontFamily: C.mono,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: 'rgb(255,140,0)',
+                    }}>
+                        NOT READY
+                    </div>
+                </>
+            )}
+
+            {/* ── 通用占位符（源代码原有逻辑，完全保留）── */}
+            {showPlaceholder && (
+                <>
+                    <div style={{
+                        fontSize: 24,
+                        opacity: isOnAir || isPreview ? 0.3 : 0.18,
+                        marginBottom: 4,
+                    }}>
+                        {isCamera ? '🎥' : '▶'}
+                    </div>
+                    <div style={{
+                        fontFamily: C.mono,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.1em',
+                        color: 'rgba(255,255,255,0.2)',
+                    }}>
+                        {isCamera ? 'CAM' : 'VT/VO'}
+                    </div>
+                </>
+            )}
+
+            {/* ── 运行时覆盖角标 ── */}
+            {isOverride && (
+                <div style={{
+                    position: 'absolute',
+                    top: 3,
+                    right: 3,
+                    background: 'rgb(255,140,0)',
+                    color: '#000',
+                    fontFamily: C.mono,
+                    fontSize: 8,
+                    fontWeight: 700,
+                    padding: '1px 4px',
+                    borderRadius: 2,
+                    letterSpacing: '0.06em',
+                    pointerEvents: 'none',
+                }}>
+                    OVR
+                </div>
+            )}
+
+        </div>
+    )
+}
+
+// ─── Story 类型判断 ───────────────────────────────────────────────────────────
+
+function getStoryDisplayType(segment: ISegment): StoryDisplayType {
+    const slug = segment.name.toUpperCase()
+    const parts = segment.parts ?? []
+
+    if (slug.includes('COLD') || slug.includes('COLD_OPEN')) return 'COLD_OPEN'
+    if (slug.includes('TEASER')) return 'TEASER'
+    if (slug.includes('OPENING') || slug.includes('OPEN')) return 'OPENING'
+    if (slug.includes('COMING') || slug.includes('COME_BACK')
+        || slug.includes('COMING_BACK') || slug.includes('COMINGBACK')) return 'COMING_BACK'
+    if (slug.includes('ENDING') || slug.includes('GOODBYE')) return 'ENDING'
+    if (slug.includes('BREAK') || slug.includes('BRK')) return 'BREAK'
+    if (slug.includes('COMMERCIAL') || slug.includes('AD')
+        || slug.includes('AD_')) return 'AD'
+    if (slug.includes('WEATHER') || slug.includes('WX')) return 'WEATHER'
+    if (slug.includes('HELLO')) return 'COLD_OPEN'
+
+    const hasCAM = parts.some(p => p.type === PartType.KAM)
+    const hasVT = parts.some(p => p.type === PartType.SERVER)
+    const hasVO = parts.some(p => p.type === PartType.VO)
+    const hasLV = parts.some(p => p.type === PartType.LIVE)
+
+    if (hasLV) return 'LIVE'
+    if (hasCAM && hasVT) return 'PKG'
+    if (hasCAM && hasVO) return 'VO'
+    if (hasCAM) return 'CAM'
+    if (hasVT) return 'PKG'
+
+    return 'UNKNOWN'
+}
+
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
+
+function fmtMs(ms: number): string {
+    if (!ms || ms <= 0) return '—'
+    const totalSec = Math.floor(ms / 1000)
+    const m = Math.floor(totalSec / 60)
+    const s = totalSec % 60
+    return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+// ─── Story 行数据结构 ─────────────────────────────────────────────────────────
+
+interface StoryRow {
+    segment: ISegment
+    parts: IPart[]
+    pgLabel: string
+    totalDurMs: number
+    backTimeMs: number
+}
+
+function buildStoryRows(rundown: IRundown): StoryRow[] {
+    const allSegments = (rundown.segments ?? []) as ISegment[]
+    const segments = allSegments.filter(seg => (seg.parts ?? []).length > 0)
+    const rows: StoryRow[] = []
+    const allParts = segments.flatMap(seg => seg.parts ?? [])
+    const totalDuration = allParts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
+    let accumulated = 0
+
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i]
+        const parts = seg.parts ?? []
+        const storyDur = seg.expectedDuration
+            ?? parts.reduce((acc, p) => acc + (p.expectedDuration ?? 0), 0)
+        rows.push({
+            segment: seg,
+            parts,
+            pgLabel: seg.storyNum ?? String(i + 1).padStart(2, '0'),
+            totalDurMs: storyDur,
+            backTimeMs: totalDuration - accumulated,
+        })
+        accumulated += storyDur
+    }
+    return rows
+}
+
+// ─── 全局动画 ─────────────────────────────────────────────────────────────────
+
+function injectAnimations() {
+    if (typeof document === 'undefined') return
+    if (document.getElementById('rcas-rl-anim')) return
+    const style = document.createElement('style')
+    style.id = 'rcas-rl-anim'
+    //style.textContent = `@keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }`
+    style.textContent = `
+        @keyframes rcas-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes rcas-pgm-pulse {
+            0%,100% { box-shadow: 0 0 0 4px #f8071d, 0 0 16px 6px rgba(255,255,255,0.9); }
+            50%     { box-shadow: 0 0 0 4px rgba(248,7,29,0.3), 0 0 6px 2px rgba(255,255,255,0.2); }
+        }
+        @keyframes rcas-pvw-pulse {
+            0%,100% { box-shadow: 0 0 0 4px rgb(10,194,99), 0 0 16px 6px rgba(255,255,255,0.9); }
+            50%     { box-shadow: 0 0 0 4px rgba(10,194,99,0.3), 0 0 6px 2px rgba(255,255,255,0.2); }
+        }
+    `
+    document.head.appendChild(style)
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+export interface RundownListProps {
+    rundown: IRundown
+    runtime: RundownRuntime | null
+    disabled: boolean
+    onSetNext: (partId: string) => void
+    onStatsChange?: (stats: { totalMs: number; playedMs: number; remainMs: number; expectedEnd: number }) => void
+}
+
+// ─── 主组件 ───────────────────────────────────────────────────────────────────
+
+export default function RundownListView({ rundown, runtime, disabled, onSetNext, onStatsChange }: RundownListProps) {
+    injectAnimations()
+    const rows = useMemo(() => buildStoryRows(rundown), [rundown])
+
+    // ── 所有 hooks 在顶层 ──────────────────────────────────────────
+    const isAutoFollowRef = useRef(true)
+    const [showManualBanner, setShowManualBanner] = useState(false)
+    const [containerHeight, setContainerHeight] = useState(600)
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+    const onAirRowRef        = useRef<HTMLDivElement | null>(null)
+    const prevOnAirPartId = useRef<string | null>(null)
+    const animFrameRef = useRef<number | null>(null)
+    const [followTrigger, setFollowTrigger] = useState(0)
+
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            setContainerHeight(scrollContainerRef.current.clientHeight)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!runtime?.onAirPartId) return
+    
+        if (runtime.onAirPartId !== prevOnAirPartId.current) {
+            prevOnAirPartId.current = runtime.onAirPartId
+            isAutoFollowRef.current = true
+            setShowManualBanner(false)
+        }
+        if (!isAutoFollowRef.current) return
+    
+        const timeoutId = setTimeout(() => {
+            if (!onAirRowRef.current || !scrollContainerRef.current) return
+    
+            const container = scrollContainerRef.current
+            const row       = onAirRowRef.current
+            const startTop  = container.scrollTop
+            const targetTop = row.offsetTop - container.offsetTop
+            const distance  = targetTop - startTop
+    
+            if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current)
+    
+            const animate = (currentTime: number) => {
+                const elapsed  = currentTime - startTime
+                const progress = Math.min(elapsed / duration, 1)
+                const ease     = progress < 0.5
+                    ? 2 * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 2) / 2
+                container.scrollTop = startTop + distance * ease
+                if (progress < 1) {
+                    animFrameRef.current = requestAnimationFrame(animate)
+                } else {
+                    container.scrollTop = startTop + distance
+                    animFrameRef.current = null
+                }
+            }
+    
+            const duration  = 800
+            const startTime = performance.now()
+            animFrameRef.current = requestAnimationFrame(animate)
+        }, 50)
+    
+        return () => clearTimeout(timeoutId)
+    }, [runtime?.onAirPartId, followTrigger])
+
+    const stats = useMemo(() => {
+        const allParts = rows.flatMap(r => r.parts)
+        const totalMs  = allParts.reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+        const onAirIdx = runtime?.onAirPartId
+            ? allParts.findIndex(p => (p._id as string) === runtime.onAirPartId)
+            : -1
+        const playedMs = onAirIdx >= 0
+            ? allParts.slice(0, onAirIdx).reduce((a, p) => a + (p.expectedDuration ?? 0), 0)
+            : 0
+        const remainMs = totalMs - playedMs
+        return { totalMs, playedMs, remainMs, expectedEnd: Date.now() + remainMs }
+    }, [rows, runtime?.onAirPartId])
+    
+    // stats 变化时通知父组件
+    useEffect(() => {
+        onStatsChange?.(stats)
+    }, [stats])
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: C.bgBase }}>
+            <ColumnHeader />
+            {showManualBanner && runtime?.onAirPartId && (
+                <div
+                    onClick={() => { 
+                        isAutoFollowRef.current = true
+                        setShowManualBanner(false)
+                        setFollowTrigger(n => n + 1)
+                    }}
+                    style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 6, height: 24,
+                        background: 'rgba(138,106,0,0.15)',
+                        borderBottom: '1px solid rgba(138,106,0,0.3)',
+                        cursor: 'pointer', fontFamily: C.mono, fontSize: 9,
+                        fontWeight: 700, letterSpacing: '0.1em',
+                        color: '#e0b830', flexShrink: 0,
+                    }}
+                >
+                    ⚓ 手动模式 — 点击恢复自动跟随
+                </div>
+            )}
+
+            <div
+                ref={scrollContainerRef}
+                onWheel={() => { isAutoFollowRef.current = false; setShowManualBanner(true) }}
+                onTouchMove={() => { isAutoFollowRef.current = false; setShowManualBanner(true) }}
+                style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${C.borderStrong} transparent`, overflowAnchor: 'none' }}
+            >
+                {rows.length === 0 ? <EmptyState /> : rows.map((row, idx) => {
+                    const onAirSegIdx = rows.findIndex(r =>
+                        r.parts.some(p => (p._id as string) === runtime?.onAirPartId)
+                    )
+                    const isOnAir   = idx === onAirSegIdx
+                    const previewSegIdx = rows.findIndex(r =>
+                        r.parts.some(p => (p._id as string) === runtime?.previewPartId)
+                    )
+                    
+                    const isPreview = !isOnAir && (
+                        (onAirSegIdx === -1 && previewSegIdx === idx && runtime?.previewPartId != null)
+                        ||
+                        (onAirSegIdx >= 0 && (
+                            previewSegIdx === idx
+                            || (previewSegIdx === -1 && idx === onAirSegIdx + 1)
+                            || (previewSegIdx === onAirSegIdx && idx === onAirSegIdx + 1)
+                        ))
+                    )
+                    const isNext   = false
+                    const isPlayed = onAirSegIdx >= 0 && idx < onAirSegIdx
+
+                    return (
+                        <StoryRowItem
+                            key={row.segment._id as string}
+                            row={row}
+                            isOnAir={isOnAir}
+                            isPreview={isPreview}
+                            isNext={isNext}
+                            isPlayed={isPlayed}
+                            disabled={disabled}
+                            onSetNext={onSetNext}
+                            runtime={runtime}
+                            rundown={rundown}
+                            ref={isOnAir ? onAirRowRef : null}
+                        />
+                    )
+                })}
+                <div style={{ height: containerHeight }} />
+            </div>
+        </div>
+    )
+}
+
+// ─── 列头 ─────────────────────────────────────────────────────────────────────
+
+function ColumnHeader() {
+    const col = (label: string, align: 'left' | 'right' | 'center' = 'center') => (
+        <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: C.textDim, textTransform: 'uppercase', textAlign: align }}>
+            {label}
+        </div>
+    )
+    return (
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 160px 1fr 72px 80px', padding: '0 8px', height: TOOLBAR_HEIGHT, alignItems: 'center', background: '#105752', borderBottom: `1px solid ${C.borderStrong}`, flexShrink: 0 }}>
+            {col('PG', 'center')}
+            {col('SLUG', 'center')}
+            {col('', 'left')}
+            {col('DUR', 'right')}
+            {col('BACK', 'right')}
+        </div>
+    )
+}
+
+// ─── Story 行 ─────────────────────────────────────────────────────────────────
+
+interface StoryRowItemProps {
+    row: StoryRow
+    isOnAir: boolean
+    isPreview: boolean
+    isNext: boolean
+    isPlayed: boolean
+    disabled: boolean
+    onSetNext: (partId: string) => void
+    runtime: RundownRuntime | null
+    rundown: IRundown
+}
+
+const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
+    ({ row, isOnAir, isPreview, isNext, isPlayed, runtime, onSetNext, disabled, rundown }, ref) => {
+        const [hovered, setHovered] = useState(false)
+        const hoveredSegmentId = useRCASStore(s => s.hoveredSegmentId)
+        const isKeyboardHovered = hoveredSegmentId === (row.segment._id as string)
+        const isKeyboardMode = useRCASStore(s => s.isKeyboardMode)
+        const setKeyboardMode = useRCASStore(s => s.setKeyboardMode)
+        const setHoveredSegmentId = useRCASStore(s => s.setHoveredSegmentId)
+        // ── 覆盖相关 ──────────────────────────────────────────────────────────────
+        const partOverrides = useRCASStore(s => s.overrides)
+        const setPartOverride  = useRCASStore(s => s.setPartOverride)
+        const clearPartOverride = useRCASStore(s => s.clearPartOverride)
+        const plannedDuration = useRCASStore(s => s.plannedDuration)
+
+        // 右键菜单状态
+        const [ctxMenu, setCtxMenu] = useState<{
+            partId: string
+            partType: string
+            x: number
+            y: number
+        } | null>(null)
+
+        useEffect(() => {
+            if (!ctxMenu) return
+            const close = () => setCtxMenu(null)
+            window.addEventListener('click', close)
+            return () => window.removeEventListener('click', close)
+        }, [ctxMenu])
+
+        // 按 partType 过滤同类型源
+        const SOURCE_TYPE_MAP: Record<string, string[]> = {
+            [PartType.KAM]:    ['camera'],
+            [PartType.SERVER]: ['vt', 'ddr1', 'ddr2', 'ddr3', 'ddr4'],
+            [PartType.VO]:     ['vt', 'ddr1', 'ddr2', 'ddr3', 'ddr4'],
+            [PartType.LIVE]:   ['camera'],
+        }
+
+        const sources = useRCASStore(s => s.sources)
+        const framePool = useFramePool()
+        const AVAILABLE_SOURCES = Object.values(sources)
+
+        const handleContextMenu = (e: React.MouseEvent, part: IPart) => {
+            const partId = part._id as string
+            if (partId === runtime?.onAirPartId) return   // on-air 不响应
+            e.preventDefault()
+            e.stopPropagation()
+            setCtxMenu({ partId, partType: part.type, x: e.clientX, y: e.clientY })
+        }
+        const lastClickTime = useRef<number>(0)
+        const { segment, parts, pgLabel, totalDurMs, backTimeMs } = row
+
+        const rowBorder = isOnAir ? 'rgba(248,7,29,.3)'
+            : isPreview ? 'rgba(10,194,66,.25)'
+                : isNext ? 'rgba(138,106,0,.18)'
+                    : 'rgba(30,37,48,.7)'
+
+        const textColor = isOnAir || isPreview ? '#FFFFFF'
+            : isNext ? C.nxtText
+                : C.textSec
+
+        // ── 纯色底 ──────────────────────────────────────────────────────────
+        const rowBg = isOnAir
+            ? 'rgb(180, 0, 21)'    // 纯红
+            : isPreview
+                ? 'rgb(0,155,60)'    // 纯绿
+                : isPlayed
+                    ? '#999999'          // 已播：更暗的灰，明显区别
+                    : '#a6a6a6'          // 未播：标准灰
+
+        // ── 遮罩：所有行统一，只做顶部高光 + 底部变暗 ──────────────────────
+        const overlayGradient =
+            'linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.0) 35%, rgba(0,0,0,0.7) 100%)'
+
+            return (
+            <div
+                ref={ref}
+                style={{
+                    display: 'grid',
+                    gridTemplateColumns: '80px 160px 1fr 72px 80px',
+                    padding: '0 8px',
+                    alignItems: 'center',
+                    background: rowBg,
+                    position: 'relative',
+                    borderRadius: 3,
+                    borderLeft: `none`,
+                    borderBottom: `1px solid ${rowBorder}`,
+                    marginBottom: 2,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                    opacity: isPlayed ? 0.5 : 1,
+                    transition: 'background 0.08s',
+                }}
+                onDragOver={(e) => {
+                    e.preventDefault()
+                }}
+                onMouseEnter={() => { setHovered(true); setHoveredSegmentId(row.segment._id as string); setKeyboardMode(false) }}
+                onMouseLeave={() => { setHovered(false); setHoveredSegmentId(null) }}
+                onClick={() => { setHoveredSegmentId(row.segment._id as string); setKeyboardMode(false) }}
+                onDoubleClick={(e) => {
+                    if ((e.target as HTMLElement).closest('[data-part-id]')) return
+                    const firstPart = row.parts[0]
+                    if (firstPart && !disabled && !isOnAir) {
+                        onSetNext(firstPart._id as string)
+                    }
+                }}
+            >
+                {/* PG */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    position: 'relative', zIndex: 1,
+                }}>
+                    <div style={{ fontFamily: C.mono, fontSize: 20, color: textColor, textAlign: 'center' }}>
+                        {pgLabel}
+                    </div>
+                </div>
+
+                {/* TYPE + SLUG */}
+                {(() => {
+                    const storyType = getStoryDisplayType(segment)
+                    const ts = STORY_TYPE_STYLE[storyType]
+                    return (
+                        <div style={{
+                            display: 'flex', flexDirection: 'column',
+                            height: '100%', overflow: 'hidden',
+                            paddingTop: 2, paddingBottom: 7,
+                            position: 'relative', zIndex: 1,
+                        }}>
+                            <div style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }}>
+                                <div style={{
+                                    fontFamily: C.sans, fontSize: 11, fontWeight: 600,
+                                    color: '#FFF', lineHeight: '1.35',
+                                    maxHeight: '4.05em', overflow: 'hidden', wordBreak: 'break-all',
+                                }}>
+                                    {segment.name || segment.externalId}
+                                </div>
+                            </div>
+                            <div style={{
+                                flexShrink: 0, height: 36,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: ts.color,
+                                fontFamily: C.mono, fontSize: 22, fontWeight: 800,
+                                color: '#FFF', letterSpacing: '0.06em', whiteSpace: 'nowrap',
+                            }}>
+                                <span>{ts.line1}</span>
+                                {ts.line2 && <span style={{ marginLeft: 4 }}>{ts.line2}</span>}
+                            </div>
+                        </div>
+                    )
+                })()}
+
+                {/* 缩略图 */}
+                <div
+                    style={{
+                        display:    'flex',
+                        flexDirection: 'column',
+                        gap:        6,
+                        padding:    '6px 8px',
+                        position:   'relative',
+                        zIndex:     3,
+                        overflowX:  'auto',
+                        overflowY:  'hidden',
+                        cursor:     'grab',
+                        scrollbarWidth: 'none',
+                    }}
+                    
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnter={(e) => e.preventDefault()}
+
+                    onMouseDown={(e) => {
+                        // 如果是从源面板拖过来的，不触发滚动逻辑
+                        if (e.buttons !== 1) return
+                        const el     = e.currentTarget
+                        const startX = e.pageX - el.scrollLeft
+                        const onMove = (ev: MouseEvent) => {
+                            el.scrollLeft      = ev.pageX - startX
+                            el.style.cursor    = 'grabbing'
+                        }
+                        const onUp = () => {
+                            el.style.cursor = 'grab'
+                            window.removeEventListener('mousemove', onMove)
+                            window.removeEventListener('mouseup',   onUp)
+                        }
+                        window.addEventListener('mousemove', onMove)
+                        window.addEventListener('mouseup',   onUp)
+                    }}
+                >
+                    {parts.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                            {parts.map((part, partIdx) => {
+                                const partId = part._id as string
+                                const isPartOnAir = partId === runtime?.onAirPartId
+                                const isPartPreview = partId === runtime?.previewPartId
+                                const isOverride = !!partOverrides[partId]
+
+                                // 从 pieces 里取主 Piece 的数据
+                                const mainPiece = part.pieces?.find(p => {
+                                    if (part.type === PartType.KAM) return p.sourceLayerId === 'camera'
+                                    if (part.type === PartType.SERVER) return p.sourceLayerId === 'video'
+                                    if (part.type === PartType.VO) return p.sourceLayerId === 'vo'
+                                    return true
+                                }) ?? part.pieces?.[0] ?? null
+
+                                return (
+                                    <div
+                                        key={partId}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 3 }}
+                                        data-part-id={partId}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onContextMenu={(e) => handleContextMenu(e, part)}
+                                        onClick={() => {
+                                            const now = Date.now()
+                                            if (now - lastClickTime.current < 300) {
+                                                !disabled && !isPartOnAir && onSetNext(part._id as string)
+                                                lastClickTime.current = 0
+                                            } else {
+                                                lastClickTime.current = now
+                                            }
+                                        }}
+                                    >
+                                        {/* 拖拽目标层，包裹 ThumbnailPlaceholder */}
+                                        <div
+                                            onDragOver={(e) => {
+                                                if (partId === runtime?.onAirPartId) return
+                                                e.preventDefault()
+                                                e.dataTransfer.dropEffect = 'copy'
+                                            }}
+                                            onDrop={(e) => {
+                                                if (partId === runtime?.onAirPartId) return
+                                                e.preventDefault()
+                                                const sourceId = e.dataTransfer.getData('sourceId')
+                                                if (!sourceId) return
+                                                const droppedSource = Object.values(sources).find(s => s.id === sourceId)
+                                                if (!droppedSource) return
+                                                const allowedTypes = SOURCE_TYPE_MAP[part.type] ?? []
+                                                if (!allowedTypes.includes(droppedSource.type)) return
+                                                const ddrFile = e.dataTransfer.getData('ddrFile') || undefined
+                                                setPartOverride(partId, sourceId, ddrFile)
+                                            }}
+                                            style={{ position: 'relative', display: 'inline-block' }}
+                                        >
+                                            <ThumbnailPlaceholder
+                                                type={part.type}
+                                                isOnAir={isPartOnAir}
+                                                isPreview={isPartPreview}
+                                                proxyUrl={mainPiece?.content?.thumbnailPath ?? null}
+
+                                                frameUrl={(() => {
+                                                    const sid = (part as any).sourceId
+                                                    if (!sid) return null
+                                                    const src = (sources[sid] as any)?.previewSrc
+                                                    if (!src) return null
+                                                    return framePool[src] ?? null
+                                                })()}
+
+                                                airStatus={mainPiece?.content?.airStatus ?? null}
+                                                isOverride={isOverride}
+                                            />
+                                        </div>
+                                        {partIdx < parts.length - 1 && (
+                                            <div style={{
+                                                color: 'rgba(255,255,255,0.7)',
+                                                fontSize: 14,
+                                                animation: (parts[partIdx + 1]._id as string) === runtime?.previewPartId
+                                                    ? 'rcas-blink 1s step-end infinite'
+                                                    : 'none'
+                                            }}>→</div>
+                                        )}
+                                    </div>
+                                )
+                                })}
+                        </div>
+                    )}
+
+                    {/* 右键菜单 */}
+                    {ctxMenu && typeof document !== 'undefined' && ReactDOM.createPortal(
+                        <div
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                                position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 9999,
+                                background: '#1a1f28', border: '1px solid #2d3848', borderRadius: 4,
+                                padding: '4px 0', minWidth: 148,
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
+                                fontFamily: C.mono, fontSize: 11,
+                            }}
+                        >
+                            {AVAILABLE_SOURCES
+                                .filter(s => (SOURCE_TYPE_MAP[ctxMenu.partType] ?? []).includes(s.type))
+                                .map(source => {
+                                    const isSelected = partOverrides[ctxMenu.partId]?.sourceId === source.id
+                                    return (
+                                        <div
+                                            key={source.id}
+                                            onClick={() => { setPartOverride(ctxMenu.partId, source.id); setCtxMenu(null) }}
+                                            style={{
+                                                padding: '5px 12px', cursor: 'pointer',
+                                                color: isSelected ? 'rgb(255,140,0)' : '#dde4ee',
+                                                background: isSelected ? 'rgba(255,140,0,0.1)' : 'transparent',
+                                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                            }}
+                                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(255,140,0,0.1)' : 'transparent' }}
+                                        >
+                                            <span>{isSelected ? '✓ ' : ''}{source.label}</span>
+                                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 9, marginLeft: 8 }}>{source.id}</span>
+                                        </div>
+                                    )
+                                })
+                            }
+                            {!!partOverrides[ctxMenu.partId] && (
+                                <>
+                                    <div style={{ height: 1, background: '#2d3848', margin: '4px 0' }} />
+                                    <div
+                                        onClick={() => { clearPartOverride(ctxMenu.partId); setCtxMenu(null) }}
+                                        style={{ padding: '5px 12px', cursor: 'pointer', color: 'rgb(255,140,0)' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                        清除覆盖
+                                    </div>
+                                </>
+                            )}
+                        </div>,
+                        document.body
+                    )}
+                </div>
+
+                {/* DUR */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                    height: 22, position: 'relative', zIndex: 1,
+                }}>
+                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>{fmtMs(totalDurMs)}</span>
+                </div>
+
+                {/* BACK */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                    height: 22, position: 'relative', zIndex: 1,
+                }}>
+                    <span style={{ fontFamily: C.mono, fontSize: 11, color: textColor }}>
+                        {(() => {
+                            const { expectedStart } = rundown
+                            if (!expectedStart || !plannedDuration) return fmtMs(backTimeMs)
+                            const backClock = expectedStart + plannedDuration - backTimeMs
+                            const d = new Date(backClock)
+                            const HH = String(d.getHours()).padStart(2, '0')
+                            const mm = String(d.getMinutes()).padStart(2, '0')
+                            const ss = String(d.getSeconds()).padStart(2, '0')
+                            return `${HH}:${mm}:${ss}`
+                        })()}
+                    </span>
+                </div>
+
+                {/* ─── 顶层渐变遮罩：所有行统一，只做光照 ─── */}
+                <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 3,
+                    background: overlayGradient,
+                    pointerEvents: 'none',
+                    zIndex: 4,
+                    boxShadow: (isKeyboardHovered || (hovered && !isKeyboardMode)) && !isOnAir && !isPreview
+                        ? 'inset 0 0 0 3px rgba(255,255,255,1)'
+                        : 'none',
+                }} />
+            </div>
+        )
+    }
+)
+
+// ─── 空状态 ───────────────────────────────────────────────────────────────────
+
+function EmptyState() {
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: 200, fontFamily: C.mono, fontSize: 11, color: C.textDim,
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+        }}>
+            NO RUNDOWN DATA
+        </div>
+    )
+}
+
+// ─── 底部汇总栏 ───────────────────────────────────────────────────────────────
+
+

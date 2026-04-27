@@ -100,22 +100,22 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
      * 设置预监源
      * @param sourceId NCS 侧的 sourceId（如 "CAM1"，或已有覆盖的 sourceId）
      */
-    setPreview(sourceId: string): boolean {
+    async setPreview(sourceId: string): Promise<void> {
         const slot = this._resolveSlot(sourceId)
         if (!slot) {
             logger.warn(`[TricasterDriver] setPreview: sourceId "${sourceId}" not found in switcherMap`)
-            return false
+            return
         }
         // shortcut: main_b_row_named_input，value 用 iso_label 原始值
-        return tricasterClient.sendShortcut('main_b_row_named_input', slot.switcherName)
+        tricasterClient.sendShortcut('main_b_row_named_input', slot.switcherName)
     }
 
     /**
      * 执行 TAKE（PGM ↔ PVW 互换）
      * TAKE 本质是切换动作，与具体 source 无关
      */
-    take(): boolean {
-        return tricasterClient.sendShortcut('main_background_take')
+    async take(): Promise<void> {
+        tricasterClient.sendShortcut('main_background_take')
     }
 
     // ── 查询接口（供 /api/device/inputs 使用） ────────────────────────────────
