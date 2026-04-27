@@ -7,12 +7,18 @@
 
 import type { DeviceConfig } from './interfaces/device-config'
 import type { IBaseDriver } from './interfaces/device-drivers'
-import { TricasterDriver } from './tricaster/tricaster-driver'
+import { tricasterDriver } from './tricaster/tricaster-driver'
 
 export function createDriver(config: DeviceConfig): IBaseDriver {
     switch (config.type) {
         case 'tricaster':
-            return new TricasterDriver(config as import('./interfaces/device-config').SwitcherConfig)
+            case 'tricaster':
+            // TODO-P2：TricasterDriver 尚未完整实现 ISwitcherDriver 接口
+            // 缺失：capabilities, switchToInput, auto, cut, getPreviewFrame,
+            //       subscribePreviewFrame, unsubscribePreviewFrame, getTally
+            //       subscribeTally, pushDataLink
+            // 届时去掉 as unknown as IBaseDriver，改为 new TricasterDriver(config)
+            return tricasterDriver as unknown as IBaseDriver
 
         // 以下驱动待实现（P2）
         case 'bitcentral-precis':

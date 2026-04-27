@@ -368,5 +368,5 @@ export class PlayoutController {
 
 export const playoutController = new PlayoutController(
     tricasterDriver as unknown as ISwitcherDriver,
-    null   // videoServer：Bitcentral 驱动 P2 实现后注入
+    tricasterDDRDriver   // DDR 通道由 TricasterDDRDriver 处理，复用同一 WebSocket 连接
 )
