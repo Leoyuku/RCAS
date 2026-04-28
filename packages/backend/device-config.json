@@ -1,5 +1,6 @@
 {
   "plannedDuration": 1800000,
+  "monitorOutputs": { "pvw": null, "pgm": null },
   "activeDevices": {
     "switcher": "tricaster-1",
     "videoServer": null,

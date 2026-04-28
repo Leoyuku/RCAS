@@ -22,7 +22,7 @@
  * 被使用：App.tsx
  */
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRCASStore } from '../store/useRCASStore'
 import { COLOR } from '../utils/formatters'
 import { TOOLBAR_HEIGHT, SOURCE_CARD_ROWS, DDR_TOOLBAR_HEIGHT, CG_PREVIEW_HEIGHT } from '../../../core-lib/src/ui/ui-constants'
@@ -79,8 +79,41 @@ export function RightPanel() {
         return null
     }
 
-    const pvwSrc = getPreviewSrc(runtime?.previewPartId)
-    const pgmSrc = getPreviewSrc(runtime?.onAirPartId)
+    const monitorOutputs    = useRCASStore(s => s.monitorOutputs)
+    const setMonitorOutputs = useRCASStore(s => s.setMonitorOutputs)
+
+    const pvwSrc = monitorOutputs.pvw ?? getPreviewSrc(runtime?.previewPartId)
+    const pgmSrc = monitorOutputs.pgm ?? getPreviewSrc(runtime?.onAirPartId)
+
+    const [editingMonitor, setEditingMonitor] = useState<'pvw' | 'pgm' | null>(null)
+    const [inputValue, setInputValue]         = useState('')
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    useEffect(() => {
+        if (editingMonitor) {
+            setInputValue(monitorOutputs[editingMonitor] ?? '')
+            setTimeout(() => inputRef.current?.focus(), 50)
+        }
+    }, [editingMonitor])
+
+    async function saveMonitorOutput() {
+        const val = inputValue.trim() || null
+        const newPvw = editingMonitor === 'pvw' ? val : monitorOutputs.pvw
+        const newPgm = editingMonitor === 'pgm' ? val : monitorOutputs.pgm
+        setMonitorOutputs(newPvw, newPgm)
+        setEditingMonitor(null)
+        try {
+            const cfg = await fetch('/api/device/config').then(r => r.json())
+            cfg.monitorOutputs = { pvw: newPvw, pgm: newPgm }
+            await fetch('/api/device/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cfg),
+            })
+        } catch (e) {
+            console.error('[RightPanel] Failed to save monitorOutputs:', e)
+        }
+    }
 
     return (
         <div style={{
@@ -97,15 +130,66 @@ export function RightPanel() {
                 background: COLOR.border,
                 flexShrink: 0,
             }}>
-                {pvwSrc && framePool[pvwSrc] ? (
-                    <img src={framePool[pvwSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PVW" />
-                ) : (
-                    <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
-                )}
-                {pgmSrc && framePool[pgmSrc] ? (
-                    <img src={framePool[pgmSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PGM" />
-                ) : (
-                    <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
+                {/* PVW */}
+                <div style={{ position: 'relative' }}>
+                    {pvwSrc && framePool[pvwSrc] ? (
+                        <img src={framePool[pvwSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PVW" />
+                    ) : (
+                        <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
+                    )}
+                    <button onClick={() => setEditingMonitor('pvw')} style={{
+                        position: 'absolute', top: 4, right: 4,
+                        background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
+                        color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
+                    }}>⚙</button>
+                </div>
+                {/* PGM */}
+                <div style={{ position: 'relative' }}>
+                    {pgmSrc && framePool[pgmSrc] ? (
+                        <img src={framePool[pgmSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PGM" />
+                    ) : (
+                        <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
+                    )}
+                    <button onClick={() => setEditingMonitor('pgm')} style={{
+                        position: 'absolute', top: 4, right: 4,
+                        background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
+                        color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
+                    }}>⚙</button>
+                </div>
+                {/* 输入弹窗 */}
+                {editingMonitor && (
+                    <div style={{
+                        position: 'absolute', top: '50%', left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#1a1a2e', border: `1px solid ${COLOR.border}`,
+                        borderRadius: 8, padding: 16, zIndex: 1000,
+                        display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240,
+                    }}>
+                        <div style={{ color: '#fff', fontSize: 13 }}>
+                            {editingMonitor.toUpperCase()} 信号源（如 output1）
+                        </div>
+                        <input
+                            ref={inputRef}
+                            value={inputValue}
+                            onChange={e => setInputValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveMonitorOutput(); if (e.key === 'Escape') setEditingMonitor(null) }}
+                            placeholder="output1"
+                            style={{
+                                background: '#0d0d1a', border: `1px solid ${COLOR.border}`,
+                                borderRadius: 4, color: '#fff', padding: '6px 10px', fontSize: 13,
+                            }}
+                        />
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button onClick={() => setEditingMonitor(null)} style={{
+                                background: 'transparent', border: `1px solid ${COLOR.border}`,
+                                borderRadius: 4, color: '#aaa', cursor: 'pointer', padding: '4px 12px',
+                            }}>取消</button>
+                            <button onClick={saveMonitorOutput} style={{
+                                background: COLOR.pvw, border: 'none',
+                                borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '4px 12px',
+                            }}>确认</button>
+                        </div>
+                    </div>
                 )}
             </div>
 

@@ -80,7 +80,8 @@ export default function App() {
     } = useRCASStore()
 
     const sources       = useRCASStore(s => s.sources)
-    const tricasterHost = useRCASStore(s => s.tricasterHost)
+    const tricasterHost    = useRCASStore(s => s.tricasterHost)
+    const monitorOutputs   = useRCASStore(s => s.monitorOutputs)
 
     const previewSrcs = useMemo(() => {
         if (!activeRundown || !sources) return []
@@ -93,8 +94,10 @@ export default function App() {
                 if (src) seen.add(src)
             }
         }
-        return [...seen]
-    }, [activeRundown, sources])
+        if (monitorOutputs.pvw) seen.add(monitorOutputs.pvw)
+            if (monitorOutputs.pgm) seen.add(monitorOutputs.pgm)
+            return [...seen]
+    }, [activeRundown, sources, monitorOutputs])
 
     const framePool = useTricasterFramePool(tricasterHost, previewSrcs)
 

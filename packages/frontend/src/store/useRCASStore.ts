@@ -42,6 +42,8 @@ interface RCASStore {
     setKeyboardMode: (v: boolean) => void
     tricasterHost: string | null
     plannedDuration: number | null
+    monitorOutputs: { pvw: string | null; pgm: string | null }
+    setMonitorOutputs: (pvw: string | null, pgm: string | null) => void
     tricasterStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
     sources: Record<string, { id: string; label: string; type: string; previewSrc?: string; switcherName?: string }>
 
@@ -77,7 +79,10 @@ export const useRCASStore = create<RCASStore>((set) => ({
     isKeyboardMode: false,
     sources: {},
     tricasterHost: null,
+    
+    monitorOutputs: { pvw: null, pgm: null },
     plannedDuration: null,
+    setMonitorOutputs: (pvw, pgm) => set({ monitorOutputs: { pvw, pgm } }),
     tricasterStatus: 'DISCONNECTED',
 
     _initSocket: () => {
@@ -103,7 +108,8 @@ export const useRCASStore = create<RCASStore>((set) => ({
                     const host = switcherId ? cfg?.devices?.[switcherId]?.connection?.host ?? null : null
                     if (host) console.log('[Store] tricasterHost:', host)
                         const plannedDuration = cfg?.plannedDuration ?? null
-                        set({ tricasterHost: host, plannedDuration })
+                    const monitorOutputs = cfg?.monitorOutputs ?? { pvw: null, pgm: null }
+                    set({ tricasterHost: host, plannedDuration, monitorOutputs })
                 })
                 .catch(err => console.error('[Store] Failed to load device config:', err))
         })
