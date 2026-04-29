@@ -28,6 +28,7 @@ import { runtimeOverrideStore } from '../../4_playout_controllers/runtime-overri
 import { logger }                           from '../../../shared/logger';
 import { ServerToClientEvents, ClientToServerEvents } from '../../../../../core-lib/src/socket/socket-contracts';
 import { tricasterDriver } from '../../4_playout_controllers/tricaster/tricaster-driver'
+import { deviceConfigService } from '../../4_playout_controllers/config/device-config.service'
 
 // ─── 类型定义（前端可复用） ───────────────────────────────────────────────────
 
@@ -153,15 +154,25 @@ export class SocketServer {
             });
 
             // intent: SET PART OVERRIDE
-            socket.on('intent:setPartOverride', (payload, callback) => {
+            socket.on('intent:setPartOverride', async (payload, callback) => {
                 logger.info(`[SocketServer] intent:setPartOverride from ${clientID}: part="${payload?.partId}" → source="${payload?.sourceId}"`)
                 if (!payload?.partId || !payload?.sourceId) {
                     if (callback) callback({ ok: false, error: 'partId and sourceId are required' })
                     return
                 }
-                runtimeOverrideStore.set(payload.partId, payload.sourceId)
-                // 广播最新覆盖状态给所有客户端（多端同步）
+                runtimeOverrideStore.set(payload.partId, payload.sourceId, payload.ddrFile)
                 this._io.emit('runtime:overrides', { overrides: runtimeOverrideStore.getAll() })
+                // 如果 override 的是当前 previewPart，立刻更新 Tricaster PVW
+                const runtime = rundownEngine.getRuntime()
+                if (runtime?.previewPartId === payload.partId) {
+                    const config = deviceConfigService.getConfig()
+                    const source = config.sources[payload.sourceId]
+                    if (source?.switcherName) {
+                        tricasterDriver.setPreview(payload.sourceId).catch(err =>
+                            logger.warn(`[SocketServer] override setPreview failed: ${err.message}`)
+                        )
+                    }
+                }
                 if (callback) callback({ ok: true })
             })
 

@@ -229,7 +229,8 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 isPreview={isPartPreview}
                                                 proxyUrl={mainPiece?.content?.thumbnailPath ?? null}
                                                 frameUrl={(() => {
-                                                    const sid = (part as any).sourceId
+                                                    const overrideSid = partOverrides[partId]?.sourceId
+                                                    const sid = overrideSid ?? (part as any).sourceId
                                                     if (!sid) return null
                                                     const src = (sources[sid] as any)?.previewSrc
                                                     if (!src) return null

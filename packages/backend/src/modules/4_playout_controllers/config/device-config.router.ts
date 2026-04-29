@@ -169,12 +169,12 @@ deviceConfigRouter.get('/files/browse', (req: Request, res: Response) => {
         if (process.platform === 'win32') {
             let drives: { name: string; fullPath: string; isDirectory: boolean }[] = []
             try {
-                const output = execSync('wmic logicaldisk get name', { encoding: 'utf8' })
+                const output = execSync('powershell -Command "Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Name"', { encoding: 'utf8' })
                 drives = output
                     .split('\n')
                     .map(line => line.trim())
-                    .filter(line => /^[A-Z]:$/.test(line))
-                    .map(letter => `${letter}\\`)
+                    .filter(line => /^[A-Z]$/i.test(line))
+                    .map(letter => `${letter.toUpperCase()}:\\`)
                     .map(d => ({ name: d, fullPath: d, isDirectory: true }))
             } catch {
                 drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\', 'H:\\', 'Z:\\']
@@ -203,7 +203,7 @@ deviceConfigRouter.get('/files/browse', (req: Request, res: Response) => {
         res.json({
             entries,
             current: dirPath,
-            parent: parent !== dirPath ? parent : null, // 到根目录时 parent 为 null
+            parent: parent !== dirPath ? parent : '', // 到根目录时 parent 为 null
         })
     } catch (err: any) {
         res.status(400).json({ error: err.message })
