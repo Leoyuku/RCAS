@@ -20,16 +20,17 @@ import { useRCASStore } from '../store/useRCASStore'
 
 interface AddSourceCardProps {
     existingSourceIds: string[]
-    tricasterHost:     string | null
+    tricasterHost: string | null
+    allCameraIds: string[]
 }
 
-export default function AddSourceCard({ existingSourceIds, tricasterHost }: AddSourceCardProps) {
+export default function AddSourceCard({ existingSourceIds, tricasterHost, allCameraIds }: AddSourceCardProps) {
     const [open, setOpen]       = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError]     = useState<string | null>(null)
     const { addSource } = useRCASStore()
 
-    const candidates = ['CAM1','CAM2','CAM3','CAM4','CAM5','CAM6','CAM7','CAM8','CAM9']
+    const candidates = allCameraIds.filter(id => !existingSourceIds.includes(id))
         .filter(id => !existingSourceIds.includes(id))
 
     async function handleSelect(camId: string) {
@@ -41,7 +42,7 @@ export default function AddSourceCard({ existingSourceIds, tricasterHost }: AddS
             const res  = await fetch(`/api/device/inputs`)
             const data = await res.json()
             const slot = data.slots?.find((s: any) =>
-                s.switcherName?.toUpperCase() === camId.toUpperCase()
+                s.switcherName?.replace(/\s+/g, '').toUpperCase() === camId.replace(/\s+/g, '').toUpperCase()
             )
 
             if (!slot) {
@@ -56,7 +57,8 @@ export default function AddSourceCard({ existingSourceIds, tricasterHost }: AddS
                 type:         'camera',
                 previewSrc:   slot.previewSrc,
                 switcherName: slot.switcherName,
-            })
+                pinned:       true,
+            } as any)
 
             setOpen(false)
         } catch {

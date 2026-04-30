@@ -57,7 +57,7 @@ interface RCASStore {
     clearPartOverride: (partId: string) => void
     setHoveredSegmentId: (id: string | null) => void
     setHoveredPartId: (id: string | null) => void
-    addSource: (source: { id: string; label: string; type: string; previewSrc: string; switcherName: string }) => Promise<void>
+    addSource: (source: { id: string; label: string; type: string; previewSrc: string; switcherName: string; pinned?: boolean }) => Promise<void>
 
     _initSocket: () => void
 }

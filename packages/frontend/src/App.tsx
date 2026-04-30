@@ -94,6 +94,13 @@ export default function App() {
                 if (src) seen.add(src)
             }
         }
+        // 加入手动 pinned 的 source
+        for (const source of Object.values(sources)) {
+            if ((source as any).pinned && (source as any).previewSrc) {
+                seen.add((source as any).previewSrc)
+            }
+        }
+        
         if (monitorOutputs.pvw) seen.add(monitorOutputs.pvw)
             if (monitorOutputs.pgm) seen.add(monitorOutputs.pgm)
             return [...seen]

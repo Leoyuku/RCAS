@@ -79,6 +79,7 @@ export interface SourceConfig {
     previewSrc?: string      // camera/vt 类有；me 类没有，改为可选
     switcherName?: string    // shortcut value 用；me 类没有，改为可选
     meIndex?: number         // me 类专用
+    pinned?: boolean         // 手动添加到 Source Panel，不依赖 rundown
 }
 
 // ─── DSK 映射 ─────────────────────────────────────────────────────────────────

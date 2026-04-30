@@ -74,7 +74,7 @@ export function RightPanel() {
     }, [activeRundown])
     
     const currentSources = Object.values(sources).filter(s =>
-        s.type === activeTab && rundownSourceIds.has(s.id)
+        s.type === activeTab && (rundownSourceIds.has(s.id) || (s as any).pinned === true)
     )
 
     const tricasterHost = useRCASStore(s => s.tricasterHost)
@@ -303,9 +303,10 @@ export function RightPanel() {
                             ))}
                             {activeTab === 'camera' && (
                                 <AddSourceCard
-                                    existingSourceIds={currentSources.map(s => s.id)}
-                                    tricasterHost={tricasterHost}
-                                />
+                                existingSourceIds={currentSources.map(s => s.id)}
+                                allCameraIds={Object.values(sources).filter(s => s.type === 'camera').map(s => s.id)}
+                                tricasterHost={tricasterHost}
+                            />
                             )}
                         </>
                     )}
