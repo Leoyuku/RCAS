@@ -238,6 +238,7 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 })()}
                                                 airStatus={mainPiece?.content?.airStatus ?? null}
                                                 isOverride={isOverride}
+                                                label={partOverrides[partId]?.sourceId ?? (part as any).sourceId ?? null}
                                             />
                                         </div>
                                         {partIdx < parts.length - 1 && (

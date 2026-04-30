@@ -22,7 +22,7 @@
  * 被使用：App.tsx
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRCASStore } from '../store/useRCASStore'
 import { COLOR } from '../utils/formatters'
 import { TOOLBAR_HEIGHT, SOURCE_CARD_ROWS, DDR_TOOLBAR_HEIGHT, CG_PREVIEW_HEIGHT } from '../../../core-lib/src/ui/ui-constants'
@@ -62,7 +62,21 @@ export function RightPanel() {
     )
 
     // 当前 Tab 的源列表
-    const currentSources = Object.values(sources).filter(s => s.type === activeTab)
+    const rundownSourceIds = useMemo(() => {
+        const ids = new Set<string>()
+        for (const seg of activeRundown?.segments ?? []) {
+            for (const part of seg.parts ?? []) {
+                const sid = (part as any).sourceId
+                if (sid) ids.add(sid)
+            }
+        }
+        return ids
+    }, [activeRundown])
+    
+    const currentSources = Object.values(sources).filter(s =>
+        s.type === activeTab && rundownSourceIds.has(s.id)
+    )
+
     const tricasterHost = useRCASStore(s => s.tricasterHost)
     const runtime   = useRCASStore(s => s.runtime)
     const framePool = useFramePool()

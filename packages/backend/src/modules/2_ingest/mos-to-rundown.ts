@@ -180,7 +180,8 @@ function itemToPart(item: IMOSItem, segmentId: string, rank: number, storySlug: 
     )
     const duration = calcDuration(item)
     const pieces   = buildPieces(item, externalId)
-    const sourceId = item.camSourceId ?? null  // studio 类型从主播词解析，其余为 null
+    const rawSourceId = item.camSourceId ?? null
+    const sourceId = rawSourceId ? rawSourceId.replace(/\s+/g, '').toUpperCase() : null  // studio 类型从主播词解析，其余为 null
 
 
     return {

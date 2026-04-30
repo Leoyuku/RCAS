@@ -29,10 +29,11 @@ interface ThumbnailPlaceholderProps {
     airStatus?: string | null
     frameUrl?: string | null
     isOverride?: boolean
+    label?: string | null
 }
 
 export function ThumbnailPlaceholder({
-    type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false
+    type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false, label
 }: ThumbnailPlaceholderProps) {
     const isCamera      = type === PartType.KAM
     const isVideoServer = type === PartType.SERVER || type === PartType.VO
@@ -87,6 +88,17 @@ export function ThumbnailPlaceholder({
                     </div>
                 </>
             )}
+            {label && (
+                <div style={{
+                    position: 'absolute', top: 3, left: 3,
+                    background: 'rgba(0,0,0,0.7)',
+                    color: isOverride ? 'rgb(255,140,0)' : 'rgba(255,255,255,0.85)',
+                    fontFamily: C.mono, fontSize: 8, fontWeight: 700,
+                    padding: '1px 4px', borderRadius: 2, letterSpacing: '0.06em',
+                    pointerEvents: 'none',
+                }}>{label}</div>
+            )}
+
             {isOverride && (
                 <div style={{
                     position: 'absolute', top: 3, right: 3,
