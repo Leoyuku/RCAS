@@ -175,15 +175,13 @@ export class PlayoutController {
             return
         }
     
-        // switcherName 对 camera/vt 类必有，me 类没有
         if (!source.switcherName) {
             logger.warn(`[PlayoutController] KAM take: source "${intent.sourceId}" has no switcherName`)
             await this._switcher.take()
             return
         }
     
-        await this._switcher.setPreview(intent.sourceId)
-        await this._switcher.take()
+        await this._switcher.setPgm(intent.sourceId)
         logger.info(`[PlayoutController] KAM take: ${intent.sourceId}`)
     }
 
@@ -198,12 +196,11 @@ export class PlayoutController {
 
                 if (sourceType.startsWith('ddr') && intent.ddrFile) {
                     await tricasterDDRDriver.selectFile(intent.ddrFile, sourceType)
-                    await this._switcher.setPreview(intent.sourceId)
+                    await this._switcher.setPgm(intent.sourceId)
                 } else if (intent.sourceId) {
-                    await this._switcher.setPreview(intent.sourceId)
+                    await this._switcher.setPgm(intent.sourceId)
                 }
             }
-            await this._switcher.take()
             return
         }
 
@@ -225,9 +222,10 @@ export class PlayoutController {
 
             // 切换台切到对应输入口
             if (intent.sourceId) {
-                await this._switcher.setPreview(intent.sourceId)
+                await this._switcher.setPgm(intent.sourceId)
+            } else {
+                await this._switcher.take()
             }
-            await this._switcher.take()
             logger.info(`[PlayoutController] SERVER take (canPlayVideo): clip=${intent.clipId}, channel=${channel}`)
 
         } else if (vs.capabilities.canPushToDDR) {

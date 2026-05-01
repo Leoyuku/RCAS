@@ -111,6 +111,19 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
     }
 
     /**
+     * 直接将指定信号源切到 PGM（On Air 行）
+     * @param sourceId NCS 侧的 sourceId（如 "CAM1"）
+     */
+    async setPgm(sourceId: string): Promise<void> {
+        const slot = this._resolveSlot(sourceId)
+        if (!slot) {
+            logger.warn(`[TricasterDriver] setPgm: sourceId "${sourceId}" not found in switcherMap`)
+            return
+        }
+        tricasterClient.sendShortcut('main_a_row_named_input', slot.switcherName)
+    }
+
+    /**
      * 执行 TAKE（PGM ↔ PVW 互换）
      * TAKE 本质是切换动作，与具体 source 无关
      */

@@ -40,6 +40,30 @@
       "previewSrc": "input2",
       "switcherName": "INPUT2"
     },
+    "CAM3": {
+      "id": "CAM3",
+      "type": "camera",
+      "previewSrc": "input3",
+      "switcherName": "INPUT3"
+    },
+    "CAM4": {
+      "id": "CAM4",
+      "type": "camera",
+      "previewSrc": "input4",
+      "switcherName": "INPUT4"
+    },
+    "CAM5": {
+      "id": "CAM5",
+      "type": "camera",
+      "previewSrc": "input5",
+      "switcherName": "INPUT5"
+    },
+    "CAM6": {
+      "id": "CAM6",
+      "type": "camera",
+      "previewSrc": "input6",
+      "switcherName": "INPUT6"
+    },
     "DDR1": {
       "id": "DDR1",
       "type": "ddr1",

@@ -48,6 +48,7 @@ export interface ISwitcherDriver extends IBaseDriver {
     //stopDDR(ddr: string): Promise<void>
     // — 预监切换 —
     setPreview(sourceId: string): Promise<void>
+    setPgm(sourceId: string): Promise<void>
 
     // — DSK（仅 dsk = true 时有意义）—
     // layer 参数来自 device-config.json dskMapping[pieceType]，由 PlayoutController 传入

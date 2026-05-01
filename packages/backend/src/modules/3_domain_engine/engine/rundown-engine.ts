@@ -91,7 +91,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
     /**
      * TAKE：将 previewPartId（或 nextPartId）切换为 onAir
      */
-    intentTake(): { ok: boolean; error?: string } {
+    intentTake(): { ok: boolean; error?: string; newPreviewId?: string | null } {
         if (!this._runtime) {
             return { ok: false, error: 'No active rundown' };
         }
@@ -173,7 +173,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         // 触发 State Loop
         this._startStateLoop()
         logger.info(`[RundownEngine] TAKE → onAir: "${takePartId}", next: "${newNextId}"`);
-        return { ok: true };
+        return { ok: true, newPreviewId };
     }
 
     intentRun(): { ok: boolean; error?: string } {

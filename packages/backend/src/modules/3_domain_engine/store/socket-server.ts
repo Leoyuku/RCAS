@@ -119,17 +119,50 @@ export class SocketServer {
             });
 
             // intent: TAKE
-            socket.on('intent:take', (callback) => {
+            socket.on('intent:take', async (callback) => {
                 logger.info(`[SocketServer] intent:take from ${clientID}`);
                 const result = rundownEngine.intentTake();
                 if (callback) callback(result);
+            
+                // TAKE 完成后，立刻把下一个 previewPart 的信号源推到 Tricaster PVW
+                if (result.ok && result.newPreviewId) {
+                    const config = deviceConfigService.getConfig()
+                    const runtime = rundownEngine.getRuntime()
+                    const parts = runtime ? (() => {
+                        const rundown = rundownStore.getRundown(runtime.rundownId)
+                        return rundown?.segments?.flatMap(s => s.parts ?? []) ?? []
+                    })() : []
+                    const previewPart = parts.find(p => p._id === result.newPreviewId)
+                    const sourceId = previewPart?.sourceId
+                    if (sourceId) {
+                        tricasterDriver.setPreview(sourceId).catch(err =>
+                            logger.warn(`[SocketServer] post-take setPreview failed: ${err.message}`)
+                        )
+                    }
+                }
             });
 
             // intent: RUN
-            socket.on('intent:run', (callback) => {
+            socket.on('intent:run', async (callback) => {
                 logger.info(`[SocketServer] intent:run from ${clientID}`)
                 const result = rundownEngine.intentRun()
                 if (callback) callback(result)
+            
+                // RUN 后立刻把第一个 previewPart 的信号源推到 Tricaster PVW
+                if (result.ok) {
+                    const runtime = rundownEngine.getRuntime()
+                    if (runtime?.previewPartId) {
+                        const rundown = rundownStore.getRundown(runtime.rundownId)
+                        const parts = rundown?.segments?.flatMap(s => s.parts ?? []) ?? []
+                        const previewPart = parts.find(p => p._id === runtime.previewPartId)
+                        const sourceId = previewPart?.sourceId
+                        if (sourceId) {
+                            tricasterDriver.setPreview(sourceId).catch(err =>
+                                logger.warn(`[SocketServer] post-run setPreview failed: ${err.message}`)
+                            )
+                        }
+                    }
+                }
             })
 
             // intent: STOP
