@@ -239,7 +239,13 @@ export class PlayoutController {
             await vs.pushToDDR(intent.clipId, ddr)
             await vs.loadClip?.(intent.clipId, ddr)
             await vs.playDDR?.(ddr)
-            await this._switcher.take()
+
+            // 切换台切到 DDR 信号源（setPgm 直接指定，不走 swap）
+            if (intent.sourceId) {
+                await this._switcher.setPgm(intent.sourceId)
+            } else {
+                await this._switcher.take()
+            }
             logger.info(`[PlayoutController] SERVER take (canPushToDDR): clip=${intent.clipId}, ddr=${ddr}`)
 
         } else {
@@ -366,5 +372,6 @@ export class PlayoutController {
 
 export const playoutController = new PlayoutController(
     tricasterDriver as unknown as ISwitcherDriver,
-    tricasterDDRDriver   // DDR 通道由 TricasterDDRDriver 处理，复用同一 WebSocket 连接
+    //tricasterDDRDriver   // DDR 通道由 TricasterDDRDriver 处理，复用同一 WebSocket 连接
+    null   // 暂无外部视频服务器；DDR 由 _executeServerTake 内部直接调用 tricasterDDRDriver
 )

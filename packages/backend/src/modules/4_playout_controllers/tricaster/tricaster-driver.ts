@@ -96,31 +96,24 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
 
     // ── ISwitcherDriver 接口实现 ──────────────────────────────────────────────
 
-    /**
-     * 设置预监源
-     * @param sourceId NCS 侧的 sourceId（如 "CAM1"，或已有覆盖的 sourceId）
-     */
     async setPreview(sourceId: string): Promise<void> {
-        const slot = this._resolveSlot(sourceId)
-        if (!slot) {
-            logger.warn(`[TricasterDriver] setPreview: sourceId "${sourceId}" not found in switcherMap`)
+        const switcherName = this._resolveSwitcherName(sourceId)
+        if (!switcherName) {
+            logger.warn(`[TricasterDriver] setPreview: sourceId "${sourceId}" not found in config or switcherMap`)
             return
         }
-        // shortcut: main_b_row_named_input，value 用 iso_label 原始值
-        tricasterClient.sendShortcut('main_b_row_named_input', slot.switcherName)
+        logger.info(`[TricasterDriver] setPreview: ${sourceId} → "${switcherName}"`)
+        tricasterClient.sendShortcut('main_b_row_named_input', switcherName)
     }
 
-    /**
-     * 直接将指定信号源切到 PGM（On Air 行）
-     * @param sourceId NCS 侧的 sourceId（如 "CAM1"）
-     */
     async setPgm(sourceId: string): Promise<void> {
-        const slot = this._resolveSlot(sourceId)
-        if (!slot) {
-            logger.warn(`[TricasterDriver] setPgm: sourceId "${sourceId}" not found in switcherMap`)
+        const switcherName = this._resolveSwitcherName(sourceId)
+        if (!switcherName) {
+            logger.warn(`[TricasterDriver] setPgm: sourceId "${sourceId}" not found in config or switcherMap`)
             return
         }
-        tricasterClient.sendShortcut('main_a_row_named_input', slot.switcherName)
+        logger.info(`[TricasterDriver] setPgm: ${sourceId} → "${switcherName}"`)
+        tricasterClient.sendShortcut('main_a_row_named_input', switcherName)
     }
 
     /**
@@ -128,8 +121,38 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
      * TAKE 本质是切换动作，与具体 source 无关
      */
     async take(): Promise<void> {
-        tricasterClient.sendShortcut('main_background_take')
+        tricasterClient.sendShortcut('main_background_take', '1')
     }
+
+    async dskOn(layer: number): Promise<void> {
+        tricasterClient.sendShortcut(`main_dsk${layer}_on`, '1')
+    }
+
+    async dskOff(layer: number): Promise<void> {
+        tricasterClient.sendShortcut(`main_dsk${layer}_off`, '1')
+    }
+
+    async dskAuto(layer: number): Promise<void> {
+        tricasterClient.sendShortcut(`main_dsk${layer}_auto`, '1')
+    }
+
+    // ── ISwitcherDriver stub 方法（未使用，仅满足接口约束）─────────────────────
+    get capabilities(): any { return {} }
+    get config(): any { return {} }
+    async connect(): Promise<void> {}
+    async disconnect(): Promise<void> {}
+    async getStatus(): Promise<any> { return {} }
+    async switchToInput(_inputId: string): Promise<void> {}
+    async auto(): Promise<void> { tricasterClient.sendShortcut('main_background_auto', '1') }
+    async cut(): Promise<void> { tricasterClient.sendShortcut('main_background_cut', '1') }
+    async getPreviewFrame(_source: string): Promise<Buffer> { return Buffer.alloc(0) }
+    subscribePreviewFrame(_source: string, _cb: (frame: Buffer) => void): void {}
+    unsubscribePreviewFrame(_source: string): void {}
+    async getTally(): Promise<any> { return {} }
+    subscribeTally(_cb: (t: any) => void): void {}
+    async pushDataLink(_key: string, _value: string): Promise<void> {}
+
+    // ── 查询接口（供 /api/device/inputs 使用） ────────────────────────────────
 
     // ── 查询接口（供 /api/device/inputs 使用） ────────────────────────────────
 
@@ -319,6 +342,32 @@ export class TricasterDriver extends EventEmitter<TricasterDriverEvents> {
      */
     private _resolveSlot(sourceId: string): SwitcherSlot | undefined {
         return this._switcherMap.get(normalizeSourceId(sourceId))
+    }
+
+    /**
+     * 解析 sourceId → Tricaster switcherName（shortcut value 用）
+     * 优先级：
+     * 1. device-config.sources[sourceId].switcherName（手动配置或 _syncToDeviceConfig 同步的）
+     * 2. switcherMap 按 sourceId 归一化直接匹配（兜底）
+     */
+    private _resolveSwitcherName(sourceId: string): string | undefined {
+        // Tricaster shortcut value = 内部名称（input1/INPUT1 均可，不区分大小写）
+        // 优先用 switcherMap 的 previewSrc（从 physical_input_number 转小写得来，如 "input1"）
+        const slot = this._switcherMap.get(normalizeSourceId(sourceId))
+        if (slot?.previewSrc) {
+            return slot.previewSrc
+        }
+
+        // 兜底：从 device-config 取 switcherName，去掉空格直接用（如 "INPUT7" → "INPUT7"）
+        try {
+            const config = deviceConfigService.getConfig()
+            const source = config.sources[sourceId]
+            if (source?.switcherName) {
+                return source.switcherName.replace(/\s+/g, '')
+            }
+        } catch (_) {}
+
+        return undefined
     }
 }
 

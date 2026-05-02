@@ -133,7 +133,7 @@ export class SocketServer {
                         return rundown?.segments?.flatMap(s => s.parts ?? []) ?? []
                     })() : []
                     const previewPart = parts.find(p => p._id === result.newPreviewId)
-                    const sourceId = previewPart?.sourceId
+                    const sourceId = previewPart ? this._resolvePreviewSourceId(result.newPreviewId!, previewPart) : null
                     if (sourceId) {
                         tricasterDriver.setPreview(sourceId).catch(err =>
                             logger.warn(`[SocketServer] post-take setPreview failed: ${err.message}`)
@@ -155,7 +155,7 @@ export class SocketServer {
                         const rundown = rundownStore.getRundown(runtime.rundownId)
                         const parts = rundown?.segments?.flatMap(s => s.parts ?? []) ?? []
                         const previewPart = parts.find(p => p._id === runtime.previewPartId)
-                        const sourceId = previewPart?.sourceId
+                        const sourceId = previewPart ? this._resolvePreviewSourceId(runtime.previewPartId!, previewPart) : null
                         if (sourceId) {
                             tricasterDriver.setPreview(sourceId).catch(err =>
                                 logger.warn(`[SocketServer] post-run setPreview failed: ${err.message}`)
@@ -281,5 +281,26 @@ export class SocketServer {
         return new Promise((resolve) => {
             this._io.close(() => resolve());
         });
+    }
+
+    private _resolvePreviewSourceId(partId: string, part: any): string | null {
+        // 1. runtime override
+        const override = runtimeOverrideStore.get(partId)
+        if (override?.sourceId) return override.sourceId
+
+        // 2. MOS 数据里的 sourceId
+        if (part?.sourceId) return part.sourceId
+
+        // 3. defaultSources 兜底
+        const config = deviceConfigService.getConfig()
+        const defaults = config?.defaultSources
+        if (!defaults) return null
+        switch (part?.type) {
+            case 'kam':    return defaults.kam    ?? null
+            case 'server': return defaults.server ?? null
+            case 'vo':     return defaults.vo     ?? null
+            case 'live':   return defaults.live   ?? null
+            default:       return null
+        }
     }
 }
