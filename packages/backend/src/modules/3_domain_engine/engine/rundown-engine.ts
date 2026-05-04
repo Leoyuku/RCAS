@@ -21,6 +21,8 @@ import type { IPartInstance } from '../../../../../core-lib/src/models/part-inst
 import type { DesiredState }      from './resolver'
 import { EventEmitter }  from 'eventemitter3';
 import { rundownStore }  from '../store/rundown-store';
+import { PartType } from '../../../../../core-lib/src/models/enums'
+import { deviceConfigService } from '../../4_playout_controllers/config/device-config.service';
 import { saveRuntimeSnapshot, loadRuntimeSnapshot, clearRuntimeSnapshot } from './runtime-persistence'
 import { logger }        from '../../../shared/logger';
 import type { EngineState, RundownRuntime } from '../../../../../core-lib/src/socket/socket-contracts';
@@ -39,6 +41,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
 
     private _runtime: RundownRuntime | null = null;
     private _partInstances: IPartInstance[]  = []
+    private _tempParts: Map<string, { parts: Record<string, IPart>; order: string[] }> = new Map()
     private _lastSentState: DesiredState     = new Map()
     private _stateLoopTimer: NodeJS.Timeout | null = null
 
@@ -47,6 +50,8 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
     init(): void {
         // Rundown 被激活时，初始化 runtime
         rundownStore.on('rundownActivated', (id, rundown) => {
+            // 新 rundown 激活时清空临时 Part
+            this._tempParts = new Map()
             const parts = this._getAllParts(id);
             if (parts.length === 0) {
                 logger.warn(`[RundownEngine] Activated rundown "${id}" has no parts.`);
@@ -199,6 +204,7 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
         if (!this._runtime) {
             return { ok: false, error: 'No active rundown' }
         }
+        this._tempParts = new Map()
         this._setRuntime({
             ...this._runtime,
             engineState:         'STOPPED',
@@ -207,8 +213,104 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
             nextPartId:          null,
             onAirAt:             undefined,
             accumFinishedDiffMs: 0,
+            tempPartIds: [],
         })
         logger.info(`[RundownEngine] STOP → engine stopped, pointers cleared`)
+        return { ok: true }
+    }
+
+    /**
+     * INSERT TEMP PART：在指定位置插入临时 Part
+     */
+    insertTempPart(segmentId: string, sourceId: string, order: string[]): { ok: boolean; error?: string; partId?: string } {
+        if (!this._runtime) return { ok: false, error: 'No active rundown' };
+    
+        const SOURCE_TYPE_TO_PART_TYPE: Record<string, string> = {
+            camera: 'kam',
+            vt:     'server',
+            ddr1:   'server',
+            ddr2:   'server',
+            ddr3:   'server',
+            ddr4:   'server',
+            me:     'kam',
+        }
+    
+        const config = deviceConfigService.getConfig()
+        const source = config.sources?.[sourceId]
+        if (!source) return { ok: false, error: `Source "${sourceId}" not found` }
+    
+        const partType = (SOURCE_TYPE_TO_PART_TYPE[source.type] ?? 'KAM') as PartType
+    
+        const partId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+        const tempPart: IPart = {
+            _id:              partId as any,
+            externalId:       '',
+            segmentId:        segmentId as any,
+            title:            source.label ?? sourceId,
+            rank:             0,
+            expectedDuration: 0,
+            autoNext:         false,
+            autoNextOverlap:  0,
+            type:             partType,
+            sourceId:         sourceId,
+            pieces:           [],
+        }
+    
+        const existing = this._tempParts.get(segmentId) ?? { parts: {}, order: [] }
+        existing.parts[partId] = tempPart
+        // 把 order 里的占位符 __new__<sourceId> 替换为真实 partId
+        existing.order = order.map(id => id === `__new__${sourceId}` ? partId : id)
+        this._tempParts.set(segmentId, existing)
+    
+        if (this._runtime) this._setRuntime({
+            ...this._runtime,
+            tempPartIds: Array.from(this._tempParts.values()).flatMap(v => Object.keys(v.parts))
+        })
+    
+        logger.info(`[RundownEngine] insertTempPart: "${partId}" in segment "${segmentId}"`)
+        return { ok: true, partId }
+    }
+    
+    getTempParts(): Record<string, { parts: Record<string, IPart>; order: string[] }> {
+        return Object.fromEntries(this._tempParts)
+    }
+
+    clearTempParts(): void {
+        this._tempParts = new Map()
+        if (this._runtime) this._setRuntime({
+            ...this._runtime,
+            tempPartIds: []
+        })
+    }
+
+    /**
+     * REMOVE TEMP PART：移除临时 Part
+     */
+    removeTempPart(partId: string): { ok: boolean; error?: string } {
+        let found = false
+        for (const [segId, data] of this._tempParts) {
+            if (data.parts[partId]) {
+                delete data.parts[partId]
+                data.order = data.order.filter(id => id !== partId)
+                if (data.order.length === 0) this._tempParts.delete(segId)
+                found = true
+                break
+            }
+        }
+        if (!found) return { ok: false, error: `Temp part "${partId}" not found` }
+    
+        if (this._runtime) {
+            const patch: Partial<RundownRuntime> = {}
+            if (this._runtime.previewPartId === partId) patch.previewPartId = null
+            if (this._runtime.nextPartId     === partId) patch.nextPartId    = null
+            if (Object.keys(patch).length > 0) this._setRuntime({ ...this._runtime, ...patch })
+            else this._setRuntime({
+                ...this._runtime,
+                tempPartIds: Array.from(this._tempParts.values()).flatMap(v => Object.keys(v.parts))
+            })
+        }
+    
+        logger.info(`[RundownEngine] removeTempPart: "${partId}"`)
         return { ok: true }
     }
 
@@ -303,10 +405,31 @@ export class RundownEngine extends EventEmitter<RundownEngineEvents> {
     private _getAllParts(rundownId: string): IPart[] {
         const rundown = rundownStore.getRundown(rundownId);
         if (!rundown?.segments) return [];
-
-        return rundown.segments
-            .sort((a, b) => a.rank - b.rank)
-            .flatMap(seg => (seg.parts ?? []).sort((a, b) => a.rank - b.rank));
+    
+        const result: IPart[] = []
+        const segments = rundown.segments.sort((a, b) => a.rank - b.rank)
+    
+        for (const seg of segments) {
+            const segId = seg._id as string
+            const segParts = (seg.parts ?? []).sort((a, b) => a.rank - b.rank)
+            const tempData = this._tempParts.get(segId)
+    
+            if (!tempData) {
+                result.push(...segParts)
+                continue
+            }
+    
+            // 按 order 重建完整列表
+            const baseMap: Record<string, IPart> = {}
+            for (const p of segParts) baseMap[p._id as string] = p
+    
+            for (const id of tempData.order) {
+                const part = baseMap[id] ?? tempData.parts[id]
+                if (part) result.push(part)
+            }
+        }
+    
+        return result
     }
 
     // ── State Loop ────────────────────────────────────────────────────────────

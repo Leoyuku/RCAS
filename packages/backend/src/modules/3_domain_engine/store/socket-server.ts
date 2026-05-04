@@ -85,11 +85,12 @@ export class SocketServer {
             // 补推当前覆盖状态
             const currentOverrides = runtimeOverrideStore.getAll()
             if (currentOverrides.length > 0) {
-                // 补推 Tricaster 当前连接状态
                 socket.emit('device:status', { tricaster: tricasterDriver.connectionStatus })
-                // 补推当前覆盖状态
                 socket.emit('runtime:overrides', { overrides: currentOverrides })
             }
+            // 前端重新连接时清空所有临时 Part，广播给所有客户端
+            rundownEngine.clearTempParts()
+            this._io.emit('runtime:tempParts', { tempParts: {} })
 
             // 如果当前有 active/on-air 的 Rundown（runtime-snapshot 恢复的情况）
             // 补推完整数据，前端才能渲染详细列表
@@ -219,6 +220,30 @@ export class SocketServer {
                 runtimeOverrideStore.clear(payload.partId)
                 this._io.emit('runtime:overrides', { overrides: runtimeOverrideStore.getAll() })
                 if (callback) callback({ ok: true })
+            })
+
+            // intent: INSERT TEMP PART
+            socket.on('intent:insertTempPart', (payload, callback) => {
+                logger.info(`[SocketServer] intent:insertTempPart from ${clientID}: segment="${payload?.segmentId}" source="${payload?.sourceId}"`)
+                if (!payload?.segmentId || !payload?.sourceId || !payload?.order) {
+                    if (callback) callback({ ok: false, error: 'segmentId, sourceId and order are required' })
+                    return
+                }
+                const result = rundownEngine.insertTempPart(payload.segmentId, payload.sourceId, payload.order)
+                this._io.emit('runtime:tempParts', { tempParts: rundownEngine.getTempParts() })
+                if (callback) callback(result)
+            })
+
+            // intent: REMOVE TEMP PART
+            socket.on('intent:removeTempPart', (payload, callback) => {
+                logger.info(`[SocketServer] intent:removeTempPart from ${clientID}: part="${payload?.partId}"`)
+                if (!payload?.partId) {
+                    if (callback) callback({ ok: false, error: 'partId is required' })
+                    return
+                }
+                const result = rundownEngine.removeTempPart(payload.partId)
+                this._io.emit('runtime:tempParts', { tempParts: rundownEngine.getTempParts() })
+                if (callback) callback(result)
             })
         });
     }

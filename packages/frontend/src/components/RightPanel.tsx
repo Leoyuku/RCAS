@@ -140,35 +140,52 @@ export function RightPanel() {
             <div style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr 1fr',
-                gap: 0,
-                background: COLOR.border,
+                background: 'transparent',
                 flexShrink: 0,
             }}>
                 {/* PVW */}
                 <div style={{ position: 'relative' }}>
-                    {pvwSrc && framePool[pvwSrc] ? (
-                        <img src={framePool[pvwSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PVW" />
-                    ) : (
-                        <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
-                    )}
-                    <button onClick={() => setEditingMonitor('pvw')} style={{
-                        position: 'absolute', top: 4, right: 4,
-                        background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
-                        color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
-                    }}>⚙</button>
+                    <div style={{ position: 'relative', border: `3px solid ${COLOR.pvw}`, }}>
+                        {pvwSrc && framePool[pvwSrc] ? (
+                            <img src={framePool[pvwSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PVW" />
+                        ) : (
+                            <MonitorPlaceholder label="PVW" color={COLOR.pvw} />
+                        )}
+                        <button onClick={() => setEditingMonitor('pvw')} style={{
+                            position: 'absolute', top: 4, right: 4,
+                            background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
+                            color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
+                        }}>⚙</button>
+                    </div>
+                    <div style={{
+                        display: 'flex', justifyContent: 'center', alignItems: 'center',
+                        padding: '2px 6px', background: '#080808',
+                    }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: COLOR.pvw, letterSpacing: '0.1em', fontFamily: '"JetBrains Mono", monospace' }}>PREVIEW</span>
+                        <span style={{ fontSize: 10, color: COLOR.textDim, fontFamily: '"JetBrains Mono", monospace' }}>{pvwSrc ? `(${pvwSrc})` : ''}</span>
+                    </div>
                 </div>
                 {/* PGM */}
                 <div style={{ position: 'relative' }}>
-                    {pgmSrc && framePool[pgmSrc] ? (
-                        <img src={framePool[pgmSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PGM" />
-                    ) : (
-                        <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
-                    )}
-                    <button onClick={() => setEditingMonitor('pgm')} style={{
-                        position: 'absolute', top: 4, right: 4,
-                        background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
-                        color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
-                    }}>⚙</button>
+                    <div style={{ position: 'relative', border: `3px solid ${COLOR.pgm}`, }}>
+                        {pgmSrc && framePool[pgmSrc] ? (
+                            <img src={framePool[pgmSrc]!} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} alt="PGM" />
+                        ) : (
+                            <MonitorPlaceholder label="PGM" color={COLOR.pgm} />
+                        )}
+                        <button onClick={() => setEditingMonitor('pgm')} style={{
+                            position: 'absolute', top: 4, right: 4,
+                            background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4,
+                            color: '#fff', cursor: 'pointer', fontSize: 12, padding: '2px 6px',
+                        }}>⚙</button>
+                    </div>
+                    <div style={{
+                        display: 'flex', justifyContent: 'center', alignItems: 'center',
+                        padding: '2px 6px', background: '#080808',
+                    }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: COLOR.pgm, letterSpacing: '0.1em', fontFamily: '"JetBrains Mono", monospace' }}>PROGRAM</span>
+                        <span style={{ fontSize: 10, color: COLOR.textDim, fontFamily: '"JetBrains Mono", monospace' }}>{pgmSrc ? `(${pgmSrc})` : ''}</span>
+                    </div>
                 </div>
                 {/* 输入弹窗 */}
                 {editingMonitor && (

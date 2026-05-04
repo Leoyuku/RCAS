@@ -30,12 +30,7 @@ export default function MonitorPlaceholder({ label, color }: MonitorPlaceholderP
             position:       'relative',
             overflow:       'hidden',
         }}>
-            <div style={{
-                position:      'absolute',
-                inset:         0,
-                border:        `2px solid ${color}33`,
-                pointerEvents: 'none',
-            }}/>
+            
             <div style={{
                 position:      'absolute',
                 top:           6,

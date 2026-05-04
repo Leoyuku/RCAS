@@ -13,6 +13,7 @@
  */
 
 import { IRundown } from '../models/rundown-model';  // ← 唯一改动，../ 而不是 ./
+import { IPart } from '../models/part-model';
 
 // ─── Rundown 生命周期状态 ─────────────────────────────────────────────────────
 
@@ -40,9 +41,12 @@ export interface ServerToClientEvents {
     'rundown:lifecycle': (payload: { id: string; lifecycle: LifecycleStatus }) => void;
     'device:status': (payload: { tricaster: DeviceConnectionStatus }) => void;
     'runtime:overrides': (payload: {
-    overrides: Array<{ partId: string; sourceId: string; ddrFile?: string; createdAt: number }>
+        overrides: Array<{ partId: string; sourceId: string; ddrFile?: string; createdAt: number }>
     }) => void;
-}
+    'runtime:tempParts': (payload: {
+        tempParts: Record<string, { parts: Record<string, IPart>; order: string[] }>
+    }) => void;
+    }
 
 export interface ClientToServerEvents {
     activate: (
@@ -61,6 +65,16 @@ export interface ClientToServerEvents {
     ) => void;
 
     'intent:clearPartOverride': (
+        payload: { partId: string },
+        callback?: (result: { ok: boolean; error?: string }) => void
+    ) => void;
+
+    'intent:insertTempPart': (
+        payload: { segmentId: string; sourceId: string; order: string[] },
+        callback?: (result: { ok: boolean; error?: string }) => void
+    ) => void;
+
+    'intent:removeTempPart': (
         payload: { partId: string },
         callback?: (result: { ok: boolean; error?: string }) => void
     ) => void;
@@ -87,6 +101,9 @@ export interface RundownRuntime {
     onAirAt?: number
     /** 已完成故事的偏差累计（ms），正数=累计超时，负数=累计提前 */
     accumFinishedDiffMs?: number
+
+    /** 临时插入的 Part ID 集合 */
+    tempPartIds?: string[]
 }
 
 // ─── 设备连接状态（与 tricaster-client.ts 保持一致，core-lib 本地声明） ──────

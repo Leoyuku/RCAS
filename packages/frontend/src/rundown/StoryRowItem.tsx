@@ -30,7 +30,7 @@
  *   改 BACK 时间显示  → 修改 BACK 列的 span 内 IIFE
  */
 
-import { useState, useRef, useEffect, forwardRef } from 'react'
+import React, { useState, useRef, useEffect, forwardRef } from 'react'
 import type { IRundown } from '../../../core-lib/src/models/rundown-model'
 import type { IPart } from '../../../core-lib/src/models/part-model'
 import type { RundownRuntime } from '../../../core-lib/src/socket/socket-contracts'
@@ -66,6 +66,7 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
 
         const partOverrides     = useRCASStore(s => s.overrides)
         const setPartOverride   = useRCASStore(s => s.setPartOverride)
+        const insertTempPart = useRCASStore(s => s.insertTempPart)
         const plannedDuration   = useRCASStore(s => s.plannedDuration)
         const sources           = useRCASStore(s => s.sources)
         const framePool         = useFramePool()
@@ -113,7 +114,7 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                 ref={ref}
                 style={{
                     display: 'grid',
-                    gridTemplateColumns: '80px 160px 1fr 72px 80px',
+                    gridTemplateColumns: '80px 160px minmax(0, 1fr) 72px 80px',
                     padding: '0 8px',
                     alignItems: 'center',
                     background: rowBg,
@@ -164,21 +165,83 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
 
                 {/* 缩略图区（可横向滚动）*/}
                 <div
-                    style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 8px', position: 'relative', zIndex: 3, overflowX: 'auto', overflowY: 'hidden', cursor: 'grab', scrollbarWidth: 'none' }}
+                    className="rcas-parts-scroll"
+                    style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 8px 10px 8px', position: 'relative', zIndex: 3, overflowX: 'auto', overflowY: 'hidden', cursor: 'default', minWidth: 0, scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.3) transparent' }}
                     onDragOver={(e) => e.preventDefault()}
                     onDragEnter={(e) => e.preventDefault()}
                     onMouseDown={(e) => {
                         if (e.buttons !== 1) return
                         const el = e.currentTarget
-                        const startX = e.pageX - el.scrollLeft
-                        const onMove = (ev: MouseEvent) => { el.scrollLeft = ev.pageX - startX; el.style.cursor = 'grabbing' }
-                        const onUp = () => { el.style.cursor = 'grab'; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+                        const startX = e.pageX
+                        const startScroll = el.scrollLeft
+                        const onMove = (ev: MouseEvent) => {
+                            el.scrollLeft = startScroll - (ev.pageX - startX)
+                            el.style.cursor = 'grabbing'
+                        }
+                        const onUp = () => {
+                            el.style.cursor = 'grab'
+                            window.removeEventListener('mousemove', onMove)
+                            window.removeEventListener('mouseup', onUp)
+                        }
                         window.addEventListener('mousemove', onMove)
                         window.addEventListener('mouseup', onUp)
                     }}
                 >
                     {parts.length > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <div
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const sourceId = e.dataTransfer.getData('sourceId')
+                                if (!sourceId) return
+
+                                // 找到所有 Part 的 DOM 位置
+                                const container = e.currentTarget
+                                const partEls = Array.from(container.querySelectorAll('[data-part-id]')) as HTMLElement[]
+                                const mouseX = e.clientX
+
+                                // 计算每个 Part 与拖拽物的交叠
+                                // 拖拽物宽度 160px，以鼠标为中心
+                                const dragLeft  = mouseX - 80
+                                const dragRight = mouseX + 80
+
+                                const overlapping: { partId: string; rect: DOMRect }[] = []
+                                for (const el of partEls) {
+                                    const rect = el.getBoundingClientRect()
+                                    const overlapLeft  = Math.max(dragLeft, rect.left)
+                                    const overlapRight = Math.min(dragRight, rect.right)
+                                    if (overlapRight > overlapLeft) {
+                                        overlapping.push({ partId: el.dataset.partId!, rect })
+                                    }
+                                }
+
+                                if (overlapping.length === 1) {
+                                    // 与一个 Part 交叠 → override
+                                    const partId = overlapping[0].partId
+                                    const part = parts.find(p => (p._id as string) === partId)
+                                    if (!part) return
+                                    const droppedSource = Object.values(sources).find(s => s.id === sourceId)
+                                    if (!droppedSource) return
+                                    if (!(SOURCE_TYPE_MAP[part.type] ?? []).includes(droppedSource.type)) return
+                                    const ddrFile = e.dataTransfer.getData('ddrFile') || undefined
+                                    setPartOverride(partId, sourceId, ddrFile)
+                                } else {
+                                    // 与 0 或 2 个 Part 交叠 → insert
+                                    let insertIdx = parts.length // 默认插到末尾
+                                    if (overlapping.length === 2) {
+                                        // 插到两个交叠 Part 中左边那个的后面
+                                        const leftPart = overlapping.sort((a, b) => a.rect.left - b.rect.left)[0]
+                                        insertIdx = parts.findIndex(p => (p._id as string) === leftPart.partId) + 1
+                                    }
+                                    const currentPartIds = parts.map(p => p._id as string)
+                                    const newOrder = [...currentPartIds]
+                                    newOrder.splice(insertIdx, 0, `__new__${sourceId}`)
+                                    insertTempPart(row.segment._id as string, sourceId, newOrder)
+                                }
+                            }}
+                        >
                             {parts.map((part, partIdx) => {
                                 const partId = part._id as string
                                 const isPartOnAir    = partId === runtime?.onAirPartId
@@ -191,37 +254,23 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                     return true
                                 }) ?? part.pieces?.[0] ?? null
 
+                                const isLast = partIdx === parts.length - 1
+
                                 return (
-                                    <div
-                                        key={partId}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 3 }}
-                                        data-part-id={partId}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onContextMenu={(e) => handleContextMenu(e, part)}
-                                        onClick={() => {
-                                            const now = Date.now()
-                                            if (now - lastClickTime.current < 300) {
-                                                !disabled && !isPartOnAir && onSetNext(part._id as string)
-                                                lastClickTime.current = 0
-                                            } else {
-                                                lastClickTime.current = now
-                                            }
-                                        }}
-                                    >
+                                    <React.Fragment key={partId}>
                                         <div
-                                            onDragOver={(e) => { if (partId === runtime?.onAirPartId) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
-                                            onDrop={(e) => {
-                                                if (partId === runtime?.onAirPartId) return
-                                                e.preventDefault()
-                                                const sourceId = e.dataTransfer.getData('sourceId')
-                                                if (!sourceId) return
-                                                const droppedSource = Object.values(sources).find(s => s.id === sourceId)
-                                                if (!droppedSource) return
-                                                if (!(SOURCE_TYPE_MAP[part.type] ?? []).includes(droppedSource.type)) return
-                                                const ddrFile = e.dataTransfer.getData('ddrFile') || undefined
-                                                setPartOverride(partId, sourceId, ddrFile)
+                                            style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', zIndex: 3 }}
+                                            data-part-id={partId}
+                                            onContextMenu={(e) => handleContextMenu(e, part)}
+                                            onClick={() => {
+                                                const now = Date.now()
+                                                if (now - lastClickTime.current < 300) {
+                                                    !disabled && !isPartOnAir && onSetNext(part._id as string)
+                                                    lastClickTime.current = 0
+                                                } else {
+                                                    lastClickTime.current = now
+                                                }
                                             }}
-                                            style={{ position: 'relative', display: 'inline-block' }}
                                         >
                                             <ThumbnailPlaceholder
                                                 type={part.type}
@@ -238,22 +287,31 @@ export const StoryRowItem = forwardRef<HTMLDivElement, StoryRowItemProps>(
                                                 })()}
                                                 airStatus={mainPiece?.content?.airStatus ?? null}
                                                 isOverride={isOverride}
+                                                isTemp={runtime?.tempPartIds?.includes(partId) ?? false}
                                                 label={partOverrides[partId]?.sourceId ?? (part as any).sourceId ?? null}
                                             />
                                         </div>
-                                        {partIdx < parts.length - 1 && (
-                                            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, animation: (parts[partIdx + 1]._id as string) === runtime?.previewPartId ? 'rcas-blink 1s step-end infinite' : 'none' }}>→</div>
+                                        {!isLast && (
+                                            <span style={{
+                                                color:      (parts[partIdx + 1]?._id as string) === runtime?.previewPartId ? 'rgb(10,194,99)' : 'rgba(255,255,255,0.5)',
+                                                fontSize:   13,
+                                                userSelect: 'none',
+                                                animation:  (parts[partIdx + 1]?._id as string) === runtime?.previewPartId ? 'rcas-blink 1s step-end infinite' : 'none',
+                                                flexShrink: 0,
+                                            }}>→</span>
                                         )}
-                                    </div>
+                                    </React.Fragment>
                                 )
                             })}
                         </div>
                     )}
 
+
                     {ctxMenu && (
                         <PartContextMenu
                             partId={ctxMenu.partId}
                             partType={ctxMenu.partType}
+                            isTemp={runtime?.tempPartIds?.includes(ctxMenu.partId) ?? false}
                             x={ctxMenu.x}
                             y={ctxMenu.y}
                             onClose={() => setCtxMenu(null)}

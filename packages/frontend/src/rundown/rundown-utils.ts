@@ -103,6 +103,19 @@ export function injectAnimations() {
         @keyframes rcas-pvw-pulse {
             0%,100% { box-shadow: 0 0 0 4px rgb(10,194,99), 0 0 16px 6px rgba(255,255,255,0.9); }
             50%     { box-shadow: 0 0 0 4px rgba(10,194,99,0.3), 0 0 6px 2px rgba(255,255,255,0.2); }
+        .rcas-parts-scroll::-webkit-scrollbar {
+                height: 4px;
+            }
+            .rcas-parts-scroll::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .rcas-parts-scroll::-webkit-scrollbar-thumb {
+                background: rgba(255,255,255,0.25);
+                border-radius: 2px;
+            }
+            .rcas-parts-scroll::-webkit-scrollbar-thumb:hover {
+                background: rgba(255,255,255,0.45);
+            }
         }
     `
     document.head.appendChild(style)

@@ -12,11 +12,13 @@
 
 import { useMemo, useRef, useEffect, useState } from 'react'
 import type { IRundown } from '../../core-lib/src/models/rundown-model'
+import type { IPart } from '../../core-lib/src/models/part-model'
 import type { RundownRuntime } from '../../core-lib/src/socket/socket-contracts'
 import { TOOLBAR_HEIGHT } from '../../core-lib/src/ui/ui-constants'
 import { C, } from './rundown/rundown-constants'
 import { buildStoryRows, injectAnimations } from './rundown/rundown-utils'
 import { StoryRowItem } from './rundown/StoryRowItem'
+import { useRCASStore } from './store/useRCASStore'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -94,7 +96,28 @@ function TotalBar({ stats }: { stats: { totalMs: number; playedMs: number; remai
 
 export default function RundownListView({ rundown, runtime, disabled, onSetNext, onStatsChange }: RundownListProps) {
     injectAnimations()
-    const rows = useMemo(() => buildStoryRows(rundown), [rundown])
+    const tempParts = useRCASStore(s => s.tempParts)
+
+    const rows = useMemo(() => {
+        const base = buildStoryRows(rundown)
+        if (Object.keys(tempParts).length === 0) return base
+        return base.map(row => {
+            const segId = row.segment._id as string
+            const segData = tempParts[segId]
+            if (!segData) return row
+    
+            // 按 order 重建 parts 列表
+            const baseMap: Record<string, IPart> = {}
+            for (const p of row.parts) baseMap[p._id as string] = p
+    
+            const parts: IPart[] = []
+            for (const id of segData.order) {
+                const part = baseMap[id] ?? segData.parts[id]
+                if (part) parts.push(part as IPart)
+            }
+            return { ...row, parts }
+        })
+    }, [rundown, tempParts])
 
     const isAutoFollowRef   = useRef(true)
     const [showManualBanner, setShowManualBanner] = useState(false)

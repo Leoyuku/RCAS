@@ -19,6 +19,7 @@
  */
 
 import { PartType } from '../../../core-lib/src/models/enums'
+import { COLOR } from '../utils/formatters'
 import { C } from './rundown-constants'
 
 interface ThumbnailPlaceholderProps {
@@ -29,11 +30,12 @@ interface ThumbnailPlaceholderProps {
     airStatus?: string | null
     frameUrl?: string | null
     isOverride?: boolean
+    isTemp?: boolean
     label?: string | null
 }
 
 export function ThumbnailPlaceholder({
-    type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false, label
+    type, isOnAir, isPreview, proxyUrl, airStatus, frameUrl, isOverride = false, isTemp = false, label
 }: ThumbnailPlaceholderProps) {
     const isCamera      = type === PartType.KAM
     const isVideoServer = type === PartType.SERVER || type === PartType.VO
@@ -59,6 +61,8 @@ export function ThumbnailPlaceholder({
                     : isNotReady
                         ? '0 0 0 2px rgb(255,140,0)'
                         : '0 0 0 1px rgba(255,255,255,0.08)',
+                        outline: isTemp && !isOnAir && !isPreview ? `2px dashed ${COLOR.next}` : 'none',
+                        outlineOffset: '-2px',
             animation: isOnAir
                 ? 'rcas-pgm-pulse 1.5s ease-in-out infinite'
                 : isPreview

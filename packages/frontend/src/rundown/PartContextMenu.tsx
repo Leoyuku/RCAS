@@ -30,14 +30,16 @@ interface PartContextMenuProps {
     partType: string
     x: number
     y: number
+    isTemp?: boolean
     onClose: () => void
 }
 
-export function PartContextMenu({ partId, partType, x, y, onClose }: PartContextMenuProps) {
+export function PartContextMenu({ partId, partType, x, y, isTemp = false, onClose }: PartContextMenuProps) {
     const sources         = useRCASStore(s => s.sources)
     const partOverrides   = useRCASStore(s => s.overrides)
     const setPartOverride = useRCASStore(s => s.setPartOverride)
     const clearPartOverride = useRCASStore(s => s.clearPartOverride)
+    const removeTempPart = useRCASStore(s => s.removeTempPart)
 
     const allowedSources = Object.values(sources)
         .filter(s => (SOURCE_TYPE_MAP[partType] ?? []).includes(s.type))
@@ -83,6 +85,20 @@ export function PartContextMenu({ partId, partType, x, y, onClose }: PartContext
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                         清除覆盖
+                    </div>
+                </>
+            )}
+
+            {isTemp && (
+                <>
+                    <div style={{ height: 1, background: '#2d3848', margin: '4px 0' }} />
+                    <div
+                        onClick={() => { removeTempPart(partId); onClose() }}
+                        style={{ padding: '5px 12px', cursor: 'pointer', color: '#e74c3c' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                        移除此 Part
                     </div>
                 </>
             )}
